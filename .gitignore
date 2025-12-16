@@ -1,0 +1,43 @@
+# 1. .gitignoreを作成（venvとかデータファイルを除外）
+@"
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# データディレクトリ
+source_logs/
+temp_extracted/
+filtered_logs/
+merged_logs/
+columns_reduced/
+routing_added/
+ip_split/
+ip_classified/
+protocol_extracted/
+severity_level_extracted/
+severity_extracted/
+critical_only/
+final_output/
+
+# テスト
+.pytest_cache/
+.coverage
+htmlcov/
+
+# その他
+*.log
+*.xlsx
+*.csv
+*.zip
+"@ | Out-File -FilePath .gitignore -Encoding utf8
