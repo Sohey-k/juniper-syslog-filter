@@ -1,128 +1,80 @@
 """
-test_split_ip.py - split_ip.pyモジュールのテストコード
+test_split_ip.py - split_ip.pyのテストコード
+
+IP分割機能（pandas + ファイル出力版）をテスト
 """
 
 import pytest
+import pandas as pd
 import csv
 from pathlib import Path
-import tempfile
-
-from modules.split_ip import split_routing, split_ip_from_csv, split_ip, SplitIPError
+from modules.split_ip import split_ip, SplitIPError
 
 
 @pytest.fixture
-def temp_dirs():
-    """テスト用の一時ディレクトリを作成"""
-    with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
-        yield Path(input_dir), Path(output_dir)
+def temp_dir(tmp_path):
+    """一時ディレクトリのフィクスチャ"""
+    return tmp_path
 
 
-def create_test_csv(path: Path):
-    """テスト用のCSVファイルを作成"""
-    with open(path, "w", newline="", encoding="utf-8") as f:
+def create_test_csv(csv_path: Path, rows: list):
+    """テスト用CSVファイルを作成"""
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        # ヘッダー
         writer.writerow(["Timestamp", "Hostname", "AppName", "routing", "Message"])
-        # routing分割できる行
-        writer.writerow(
+        writer.writerows(rows)
+
+
+class TestSplitIP:
+    """split_ip関数のテスト"""
+
+    def test_split_ip_basic(self, temp_dir):
+        """正常系: routing列が正しく分割される"""
+        # テストデータ作成
+        rows = [
             [
-                "2025-12-16T00:11:01Z",
+                "2025-12-16T00:00:00Z",
                 "srx-fw01",
                 "RT_IDP",
-                "192.168.195.70 > 30.84.98.42",
-                "RT_IDP_ATTACK_LOG: Malware detected",
-            ]
-        )
-        # routing分割できる行（別パターン）
-        writer.writerow(
+                "192.168.1.5 > 203.0.113.10",
+                "RT_IDP_ATTACK_LOG: SQL injection",
+            ],
             [
-                "2025-12-16T00:16:22Z",
+                "2025-12-16T00:01:00Z",
                 "srx-fw01",
                 "RT_IDP",
-                "10.0.0.5 > 203.0.113.10",
-                "RT_IDP_ATTACK_LOG: Port scan detected",
-            ]
-        )
-        # routing が空の行
-        writer.writerow(
-            [
-                "2025-12-16T00:20:00Z",
-                "srx-fw01",
-                "RT_FLOW",
-                "",
-                "RT_FLOW_SESSION_CLOSE: session closed",
-            ]
-        )
+                "10.0.0.100 > 8.8.8.8",
+                "RT_IDP_ATTACK_LOG: Port scan",
+            ],
+        ]
 
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
 
-# ============================================================================
-# split_routing 関数のテスト
-# ============================================================================
+        # 実行
+        result = split_ip([input_path], output_dir, verbose=False)
 
+        # 検証: ファイルが作成される
+        assert len(result) == 1
+        assert result[0].exists()
 
-def test_split_routing_success():
-    """正常なrouting分割のテスト"""
-    routing = "192.168.195.70 > 30.84.98.42"
+        # 出力ファイルの内容を検証
+        df = pd.read_csv(result[0], keep_default_na=False)
 
-    src_ip, dst_ip = split_routing(routing)
+        # 列が正しく追加されている
+        assert "srcIP" in df.columns
+        assert "dstIP" in df.columns
 
-    assert src_ip == "192.168.195.70"
-    assert dst_ip == "30.84.98.42"
+        # 分割結果が正しい
+        assert df.iloc[0]["srcIP"] == "192.168.1.5"
+        assert df.iloc[0]["dstIP"] == "203.0.113.10"
+        assert df.iloc[1]["srcIP"] == "10.0.0.100"
+        assert df.iloc[1]["dstIP"] == "8.8.8.8"
 
-
-def test_split_routing_empty():
-    """空のrouting文字列のテスト"""
-    routing = ""
-
-    src_ip, dst_ip = split_routing(routing)
-
-    assert src_ip == ""
-    assert dst_ip == ""
-
-
-def test_split_routing_various_patterns():
-    """様々なIPアドレスパターンのテスト"""
-    test_cases = [
-        ("10.0.0.5 > 203.0.113.10", ("10.0.0.5", "203.0.113.10")),
-        ("172.16.0.1 > 8.8.8.8", ("172.16.0.1", "8.8.8.8")),
-        ("192.168.1.100 > 192.168.1.200", ("192.168.1.100", "192.168.1.200")),
-    ]
-
-    for routing, (expected_src, expected_dst) in test_cases:
-        src_ip, dst_ip = split_routing(routing)
-        assert src_ip == expected_src
-        assert dst_ip == expected_dst
-
-
-# ============================================================================
-# split_ip_from_csv 関数のテスト
-# ============================================================================
-
-
-def test_split_ip_from_csv_success(temp_dirs):
-    """CSVファイルからのIP分割テスト"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "test.csv"
-    output_path = output_dir / "splitted.csv"
-
-    # テストCSVを作成
-    create_test_csv(input_path)
-
-    # IP分割実行
-    row_count = split_ip_from_csv(input_path, output_path, verbose=False)
-
-    # 検証: 4行処理（ヘッダー + 3行）
-    assert row_count == 4
-    assert output_path.exists()
-
-    # 出力ファイルの内容を確認
-    with open(output_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-
-        # ヘッダー確認（7列: Timestamp, Hostname, AppName, routing, srcIP, dstIP, Message）
-        assert len(rows[0]) == 7
-        assert rows[0] == [
+        # 列の順序を確認
+        cols = df.columns.tolist()
+        assert cols == [
             "Timestamp",
             "Hostname",
             "AppName",
@@ -132,74 +84,96 @@ def test_split_ip_from_csv_success(temp_dirs):
             "Message",
         ]
 
-        # 1行目: IP分割成功
-        assert rows[1][4] == "192.168.195.70"  # srcIP
-        assert rows[1][5] == "30.84.98.42"  # dstIP
+    def test_split_ip_empty_routing(self, temp_dir):
+        """正常系: routing列が空の場合は空文字列"""
+        rows = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_FLOW",
+                "",
+                "RT_FLOW_SESSION_CREATE: session created",
+            ],
+            [
+                "2025-12-16T00:01:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "192.168.1.5 > 203.0.113.10",
+                "RT_IDP_ATTACK_LOG: SQL injection",
+            ],
+        ]
 
-        # 2行目: IP分割成功
-        assert rows[2][4] == "10.0.0.5"  # srcIP
-        assert rows[2][5] == "203.0.113.10"  # dstIP
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
 
-        # 3行目: routing空（空文字）
-        assert rows[3][4] == ""  # srcIP
-        assert rows[3][5] == ""  # dstIP
+        # 実行
+        result = split_ip([input_path], output_dir, verbose=False)
 
+        # 検証
+        df = pd.read_csv(result[0], keep_default_na=False)
 
-def test_split_ip_from_csv_file_not_found(temp_dirs):
-    """存在しないファイルのテスト"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "nonexistent.csv"
-    output_path = output_dir / "splitted.csv"
+        # routing列が空の行は srcIP, dstIP も空
+        assert df.iloc[0]["srcIP"] == ""
+        assert df.iloc[0]["dstIP"] == ""
 
-    with pytest.raises(FileNotFoundError):
-        split_ip_from_csv(input_path, output_path, verbose=False)
+        # routing列がある行は正しく分割
+        assert df.iloc[1]["srcIP"] == "192.168.1.5"
+        assert df.iloc[1]["dstIP"] == "203.0.113.10"
 
+    def test_split_ip_multiple_files(self, temp_dir):
+        """正常系: 複数ファイルの処理"""
+        rows1 = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "192.168.1.1 > 8.8.8.8",
+                "Test message 1",
+            ]
+        ]
+        rows2 = [
+            [
+                "2025-12-16T01:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "10.0.0.1 > 1.1.1.1",
+                "Test message 2",
+            ]
+        ]
 
-# ============================================================================
-# split_ip 関数のテスト
-# ============================================================================
+        input_path1 = temp_dir / "test1.csv"
+        input_path2 = temp_dir / "test2.csv"
+        output_dir = temp_dir / "output"
 
+        create_test_csv(input_path1, rows1)
+        create_test_csv(input_path2, rows2)
 
-def test_split_ip_multiple_files(temp_dirs):
-    """複数ファイルのIP分割テスト"""
-    input_dir, output_dir = temp_dirs
+        # 実行
+        result = split_ip([input_path1, input_path2], output_dir, verbose=False)
 
-    # 2つのテストCSVを作成
-    input_files = []
-    for i in range(2):
-        csv_path = input_dir / f"test_{i:02d}.csv"
-        create_test_csv(csv_path)
-        input_files.append(csv_path)
+        # 検証: 2ファイルが処理される
+        assert len(result) == 2
 
-    # IP分割実行
-    output_files = split_ip(input_files, output_dir, verbose=False)
+        df1 = pd.read_csv(result[0], keep_default_na=False)
+        df2 = pd.read_csv(result[1], keep_default_na=False)
 
-    # 検証: 2ファイル作成
-    assert len(output_files) == 2
+        assert df1.iloc[0]["srcIP"] == "192.168.1.1"
+        assert df1.iloc[0]["dstIP"] == "8.8.8.8"
+        assert df2.iloc[0]["srcIP"] == "10.0.0.1"
+        assert df2.iloc[0]["dstIP"] == "1.1.1.1"
 
-    # 各ファイルが7列になっているか確認
-    for output_file in output_files:
-        with open(output_file, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader)
-            assert len(header) == 7
-            assert header[4] == "srcIP"
-            assert header[5] == "dstIP"
+    def test_split_ip_missing_routing_column(self, temp_dir):
+        """異常系: routing列が存在しない場合はエラー"""
+        # routing列がないCSVを作成
+        csv_path = temp_dir / "test.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp", "Hostname", "AppName", "Message"])
+            writer.writerow(["2025-12-16T00:00:00Z", "srx-fw01", "RT_IDP", "Test"])
 
+        output_dir = temp_dir / "output"
 
-def test_split_ip_empty_list(temp_dirs):
-    """入力ファイルが空の場合のテスト"""
-    input_dir, output_dir = temp_dirs
-
-    output_files = split_ip([], output_dir, verbose=False)
-
-    # 検証: 空のリストが返る
-    assert output_files == []
-
-
-# ============================================================================
-# 実行
-# ============================================================================
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        # 実行 & 検証
+        with pytest.raises(SplitIPError, match="routing列が見つかりません"):
+            split_ip([csv_path], output_dir, verbose=False)

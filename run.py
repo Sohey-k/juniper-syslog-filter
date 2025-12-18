@@ -219,6 +219,11 @@ def main():
             print("✅ Phase 6 完了")
             print("=" * 70)
 
+        # splitted_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(splitted_dir, "*.csv", verbose=False)
+        print("✓")
+
     except Exception as e:
         print("\n" + "=" * 70)
         print(f"❌ エラーが発生しました: {str(e)}")

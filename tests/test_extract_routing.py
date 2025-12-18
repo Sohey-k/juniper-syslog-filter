@@ -1,197 +1,149 @@
 """
-test_extract_routing.py - extract_routing.pyモジュールのテストコード
+test_extract_routing.py - extract_routing.pyのテストコード
+
+routing抽出機能（pandas + ファイル出力版）をテスト
 """
 
 import pytest
+import pandas as pd
 import csv
 from pathlib import Path
-import tempfile
-
-from modules.extract_routing import (
-    extract_routing_from_message,
-    extract_routing_from_csv,
-    extract_routing,
-    ExtractRoutingError,
-)
+from modules.extract_routing import extract_routing, ExtractRoutingError
 
 
 @pytest.fixture
-def temp_dirs():
-    """テスト用の一時ディレクトリを作成"""
-    with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
-        yield Path(input_dir), Path(output_dir)
+def temp_dir(tmp_path):
+    """一時ディレクトリのフィクスチャ"""
+    return tmp_path
 
 
-def create_test_csv(path: Path):
-    """テスト用のCSVファイルを作成"""
-    with open(path, "w", newline="", encoding="utf-8") as f:
+def create_test_csv(csv_path: Path, rows: list):
+    """テスト用CSVファイルを作成"""
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        # ヘッダー
         writer.writerow(["Timestamp", "Hostname", "AppName", "Message"])
-        # routing抽出できる行
-        writer.writerow(
+        writer.writerows(rows)
+
+
+class TestExtractRouting:
+    """extract_routing関数のテスト"""
+
+    def test_extract_routing_basic(self, temp_dir):
+        """正常系: routing情報が正しく抽出される"""
+        # テストデータ作成
+        rows = [
             [
-                "2025-12-16T00:11:01Z",
+                "2025-12-16T00:00:00Z",
                 "srx-fw01",
                 "RT_IDP",
-                "RT_IDP_ATTACK_LOG: Malware detected 192.168.195.70/14888 > 30.84.98.42/22 protocol=tcp",
-            ]
-        )
-        # routing抽出できる行（別パターン）
-        writer.writerow(
+                "RT_IDP_ATTACK_LOG: SQL injection 192.168.1.5/12345 > 203.0.113.10/80 protocol=tcp",
+            ],
             [
-                "2025-12-16T00:16:22Z",
+                "2025-12-16T00:01:00Z",
                 "srx-fw01",
                 "RT_IDP",
-                "RT_IDP_ATTACK_LOG: Port scan detected 10.0.0.5/12345 > 203.0.113.10/80 protocol=udp",
-            ]
-        )
-        # routing抽出できない行
-        writer.writerow(
+                "RT_IDP_ATTACK_LOG: Port scan 10.0.0.100/54321 > 8.8.8.8/443 protocol=tcp",
+            ],
+        ]
+
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
+
+        # 実行
+        result = extract_routing([input_path], output_dir, verbose=False)
+
+        # 検証: ファイルが作成される
+        assert len(result) == 1
+        assert result[0].exists()
+
+        # 出力ファイルの内容を検証
+        df = pd.read_csv(result[0], keep_default_na=False)
+        assert "routing" in df.columns
+        assert df.iloc[0]["routing"] == "192.168.1.5 > 203.0.113.10"
+        assert df.iloc[1]["routing"] == "10.0.0.100 > 8.8.8.8"
+
+        # 列の順序を確認（routing は Message の前）
+        cols = df.columns.tolist()
+        assert cols.index("routing") < cols.index("Message")
+
+    def test_extract_routing_no_match(self, temp_dir):
+        """正常系: routing情報がない行は空文字列"""
+        rows = [
             [
-                "2025-12-16T00:20:00Z",
+                "2025-12-16T00:00:00Z",
                 "srx-fw01",
                 "RT_FLOW",
-                "RT_FLOW_SESSION_CLOSE: session closed",
+                "RT_FLOW_SESSION_CREATE: session created",
+            ],
+            [
+                "2025-12-16T00:01:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "RT_IDP_ATTACK_LOG: SQL injection 192.168.1.5/12345 > 203.0.113.10/80 protocol=tcp",
+            ],
+        ]
+
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
+
+        # 実行
+        result = extract_routing([input_path], output_dir, verbose=False)
+
+        # 検証（keep_default_na=Falseで空文字列をNaNにしない）
+        df = pd.read_csv(result[0], keep_default_na=False)
+        assert df.iloc[0]["routing"] == ""  # routing情報なし
+        assert df.iloc[1]["routing"] == "192.168.1.5 > 203.0.113.10"  # routing情報あり
+
+    def test_extract_routing_multiple_files(self, temp_dir):
+        """正常系: 複数ファイルの処理"""
+        rows1 = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "Test 192.168.1.1/1111 > 8.8.8.8/80 data",
             ]
-        )
+        ]
+        rows2 = [
+            [
+                "2025-12-16T01:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                "Test 10.0.0.1/2222 > 1.1.1.1/443 data",
+            ]
+        ]
 
+        input_path1 = temp_dir / "test1.csv"
+        input_path2 = temp_dir / "test2.csv"
+        output_dir = temp_dir / "output"
 
-# ============================================================================
-# extract_routing_from_message 関数のテスト
-# ============================================================================
+        create_test_csv(input_path1, rows1)
+        create_test_csv(input_path2, rows2)
 
+        # 実行
+        result = extract_routing([input_path1, input_path2], output_dir, verbose=False)
 
-def test_extract_routing_from_message_success():
-    """正常なrouting抽出のテスト"""
-    message = (
-        "RT_IDP_ATTACK_LOG: Attack 192.168.195.70/14888 > 30.84.98.42/22 protocol=tcp"
-    )
+        # 検証: 2ファイルが処理される
+        assert len(result) == 2
 
-    routing = extract_routing_from_message(message)
+        df1 = pd.read_csv(result[0], keep_default_na=False)
+        df2 = pd.read_csv(result[1], keep_default_na=False)
+        assert df1.iloc[0]["routing"] == "192.168.1.1 > 8.8.8.8"
+        assert df2.iloc[0]["routing"] == "10.0.0.1 > 1.1.1.1"
 
-    assert routing == "192.168.195.70 > 30.84.98.42"
+    def test_extract_routing_missing_message_column(self, temp_dir):
+        """異常系: Message列が存在しない場合はエラー"""
+        # Message列がないCSVを作成
+        csv_path = temp_dir / "test.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp", "Hostname"])
+            writer.writerow(["2025-12-16T00:00:00Z", "srx-fw01"])
 
+        output_dir = temp_dir / "output"
 
-def test_extract_routing_from_message_no_match():
-    """routing情報がない場合のテスト"""
-    message = "RT_FLOW_SESSION_CLOSE: session closed"
-
-    routing = extract_routing_from_message(message)
-
-    assert routing is None
-
-
-def test_extract_routing_from_message_various_ips():
-    """様々なIPアドレスパターンのテスト"""
-    test_cases = [
-        ("Attack 10.0.0.5/12345 > 203.0.113.10/80", "10.0.0.5 > 203.0.113.10"),
-        ("Scan 172.16.0.1/54321 > 8.8.8.8/443", "172.16.0.1 > 8.8.8.8"),
-        (
-            "Traffic 192.168.1.100/8080 > 192.168.1.200/9090",
-            "192.168.1.100 > 192.168.1.200",
-        ),
-    ]
-
-    for message, expected in test_cases:
-        routing = extract_routing_from_message(message)
-        assert routing == expected
-
-
-# ============================================================================
-# extract_routing_from_csv 関数のテスト
-# ============================================================================
-
-
-def test_extract_routing_from_csv_success(temp_dirs):
-    """CSVファイルからのrouting抽出テスト"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "test.csv"
-    output_path = output_dir / "routed.csv"
-
-    # テストCSVを作成
-    create_test_csv(input_path)
-
-    # routing抽出実行
-    row_count = extract_routing_from_csv(input_path, output_path, verbose=False)
-
-    # 検証: 4行処理（ヘッダー + 3行）
-    assert row_count == 4
-    assert output_path.exists()
-
-    # 出力ファイルの内容を確認
-    with open(output_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-
-        # ヘッダー確認（5列: Timestamp, Hostname, AppName, routing, Message）
-        assert len(rows[0]) == 5
-        assert rows[0] == ["Timestamp", "Hostname", "AppName", "routing", "Message"]
-
-        # 1行目: routing抽出成功
-        assert rows[1][3] == "192.168.195.70 > 30.84.98.42"
-
-        # 2行目: routing抽出成功
-        assert rows[2][3] == "10.0.0.5 > 203.0.113.10"
-
-        # 3行目: routing抽出失敗（空文字）
-        assert rows[3][3] == ""
-
-
-def test_extract_routing_from_csv_file_not_found(temp_dirs):
-    """存在しないファイルのテスト"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "nonexistent.csv"
-    output_path = output_dir / "routed.csv"
-
-    with pytest.raises(FileNotFoundError):
-        extract_routing_from_csv(input_path, output_path, verbose=False)
-
-
-# ============================================================================
-# extract_routing 関数のテスト
-# ============================================================================
-
-
-def test_extract_routing_multiple_files(temp_dirs):
-    """複数ファイルのrouting抽出テスト"""
-    input_dir, output_dir = temp_dirs
-
-    # 2つのテストCSVを作成
-    input_files = []
-    for i in range(2):
-        csv_path = input_dir / f"test_{i:02d}.csv"
-        create_test_csv(csv_path)
-        input_files.append(csv_path)
-
-    # routing抽出実行
-    output_files = extract_routing(input_files, output_dir, verbose=False)
-
-    # 検証: 2ファイル作成
-    assert len(output_files) == 2
-
-    # 各ファイルが5列になっているか確認
-    for output_file in output_files:
-        with open(output_file, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader)
-            assert len(header) == 5
-            assert header[3] == "routing"
-
-
-def test_extract_routing_empty_list(temp_dirs):
-    """入力ファイルが空の場合のテスト"""
-    input_dir, output_dir = temp_dirs
-
-    output_files = extract_routing([], output_dir, verbose=False)
-
-    # 検証: 空のリストが返る
-    assert output_files == []
-
-
-# ============================================================================
-# 実行
-# ============================================================================
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        # 実行 & 検証
+        with pytest.raises(ExtractRoutingError, match="Message列が見つかりません"):
+            extract_routing([csv_path], output_dir, verbose=False)

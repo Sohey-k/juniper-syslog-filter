@@ -1,173 +1,130 @@
 """
-extract_routing.py - routing列抽出モジュール
+extract_routing.py - routing抽出モジュール（pandas版）
 
 責務:
-- reduced_logs/*.csv のMessage列から routing情報を抽出
-- srcIP/port > dstIP/port から srcIP > dstIP を抽出
-- routing列としてMessage列の前に追加
+- reduced_logs/*.csv のMessage列から routing 情報を抽出
+- パターン: srcIP/port > dstIP/port → srcIP > dstIP
+- 新しい列 routing を追加
 - routed_logs/*.csv に出力
-
-列構造:
-    入力: [Timestamp, Hostname, AppName, Message]
-    出力: [Timestamp, Hostname, AppName, routing, Message]
+- 内部的にpandasで高速処理
 """
 
-import csv
-import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Union
+import pandas as pd
+import re
 
 
 class ExtractRoutingError(Exception):
-    """routing抽出時のカスタム例外"""
+    """routing抽出処理のカスタム例外"""
 
     pass
 
 
-# 正規表現パターン: srcIP/port > dstIP/port
-ROUTING_PATTERN = re.compile(
-    r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+ > (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+"
-)
-
-
-def extract_routing_from_message(message: str) -> Optional[str]:
-    """
-    Message列からrouting情報を抽出
-
-    Args:
-        message: Message列の文字列
-
-    Returns:
-        "srcIP > dstIP" 形式の文字列、抽出できない場合はNone
-
-    Example:
-        >>> extract_routing_from_message("Attack 10.0.0.5/12345 > 203.0.113.10/80 protocol=tcp")
-        "10.0.0.5 > 203.0.113.10"
-    """
-    match = ROUTING_PATTERN.search(message)
-
-    if match:
-        src_ip = match.group(1)
-        dst_ip = match.group(2)
-        return f"{src_ip} > {dst_ip}"
-
-    return None
-
-
-def extract_routing_from_csv(
-    input_path: Path, output_path: Path, verbose: bool = False
-) -> int:
-    """
-    単一CSVファイルからrouting列を抽出して追加
-
-    Args:
-        input_path: 入力CSVファイル
-        output_path: 出力CSVファイル
-        verbose: 詳細ログを出力するか
-
-    Returns:
-        処理した行数
-
-    Raises:
-        FileNotFoundError: 入力ファイルが存在しない場合
-        ExtractRoutingError: 処理中にエラーが発生した場合
-    """
-    if not input_path.exists():
-        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
-
-    try:
-        row_count = 0
-        routing_found_count = 0
-
-        with open(input_path, "r", encoding="utf-8", newline="") as infile, open(
-            output_path, "w", encoding="utf-8", newline=""
-        ) as outfile:
-
-            reader = csv.reader(infile)
-            writer = csv.writer(outfile)
-
-            # ヘッダー行処理
-            header = next(reader, None)
-            if header:
-                # routing列を Message列の前に挿入
-                # 入力: [Timestamp, Hostname, AppName, Message]
-                # 出力: [Timestamp, Hostname, AppName, routing, Message]
-                new_header = header[:3] + ["routing"] + [header[3]]
-                writer.writerow(new_header)
-                row_count += 1
-
-            # データ行処理
-            for row in reader:
-                if len(row) >= 4:
-                    # Message列（インデックス3）からrouting抽出
-                    message = row[3]
-                    routing = extract_routing_from_message(message)
-
-                    if routing:
-                        routing_found_count += 1
-                    else:
-                        routing = ""  # 抽出できない場合は空文字
-
-                    # routing列を挿入
-                    new_row = row[:3] + [routing] + [row[3]]
-                    writer.writerow(new_row)
-                    row_count += 1
-
-        if verbose:
-            print(f"  ✓ {row_count}行処理 (routing抽出: {routing_found_count}行)")
-
-        return row_count
-
-    except Exception as e:
-        raise ExtractRoutingError(f"routing抽出中にエラーが発生しました: {str(e)}")
-
-
 def extract_routing(
-    input_files: List[Path], output_dir: Path, verbose: bool = False
+    input_files: List[Path], output_dir: Union[str, Path], verbose: bool = True
 ) -> List[Path]:
     """
-    複数のCSVファイルからrouting列を抽出して追加
+    Message列からrouting情報を抽出し、新しい列として追加
+
+    パターン: srcIP/port > dstIP/port → srcIP > dstIP
+    例: 192.168.1.5/12345 > 203.0.113.10/80 → 192.168.1.5 > 203.0.113.10
+
+    内部的にpandasで処理し、高速化を実現。
+    出力はCSVファイルとして保存され、パスのリストを返す。
 
     Args:
         input_files: 入力CSVファイルのリスト
-        output_dir: 出力ディレクトリ
+        output_dir: 出力先ディレクトリ
         verbose: 詳細ログを出力するか
 
     Returns:
-        出力されたファイルのリスト
+        List[Path]: 出力されたrouting抽出済みCSVファイルのPathリスト
 
     Raises:
-        ExtractRoutingError: 処理に失敗した場合
+        ExtractRoutingError: routing抽出処理に失敗した場合
+
+    Examples:
+        >>> files = extract_routing(csv_files, "routed_logs")
     """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     if not input_files:
         if verbose:
-            print("⚠️  処理するファイルがありません")
+            print("⚠️  入力ファイルがありません")
         return []
-
-    # 出力ディレクトリが存在しない場合は作成
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     output_files = []
 
+    # 正規表現パターン: srcIP/port > dstIP/port
+    # IPアドレス部分のみを抽出（ポート番号を除く）
+    pattern = r"(\d+\.\d+\.\d+\.\d+)/\d+\s*>\s*(\d+\.\d+\.\d+\.\d+)/\d+"
+
     try:
-        for input_file in sorted(input_files):
-            if verbose:
-                print(f"📄 処理中: {input_file.name}")
+        for input_path in input_files:
+            # pandasでCSVを読み込み
+            df = pd.read_csv(input_path, encoding="utf-8")
 
-            # 出力ファイル名は入力と同じ
-            output_path = output_dir / input_file.name
+            # Message列の存在確認
+            if "Message" not in df.columns:
+                raise ExtractRoutingError(
+                    f"Message列が見つかりません: {input_path.name}"
+                )
 
-            # routing抽出処理
-            extract_routing_from_csv(input_file, output_path, verbose=verbose)
+            # 正規表現でrouting情報を抽出
+            # str.extract() で srcIP と dstIP を抽出
+            extracted = df["Message"].str.extract(pattern, expand=True)
+
+            # srcIP > dstIP の形式に結合
+            # NaNの場合は空文字列にする
+            df["routing"] = extracted[0].fillna("") + " > " + extracted[1].fillna("")
+
+            # 両方が空の場合は空文字列に統一
+            df["routing"] = df["routing"].replace(" > ", "", regex=False)
+
+            # 最後にNaNを空文字列に変換（CSVで保存されるときにNaNにならないように）
+            df["routing"] = df["routing"].fillna("")
+
+            # 列の順序を調整: Timestamp, Hostname, AppName, routing, Message
+            cols = df.columns.tolist()
+            # routingをMessageの前に配置
+            cols.remove("routing")
+            message_idx = cols.index("Message")
+            cols.insert(message_idx, "routing")
+            df = df[cols]
+
+            # 出力ファイル名を生成（入力と同じファイル名）
+            output_path = output_dir / input_path.name
+
+            # pandasでCSVとして出力（NaNを空文字列として保存）
+            df.to_csv(output_path, index=False, encoding="utf-8", na_rep="")
 
             output_files.append(output_path)
 
-        if verbose:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成")
+            if verbose:
+                # routing抽出された行数をカウント
+                extracted_count = (df["routing"] != "").sum()
+                print(
+                    f"  ✓ {input_path.name}: {extracted_count}/{len(df)}行でrouting抽出"
+                )
+
+        if verbose and output_files:
+            print(f"\n✅ routing抽出完了: {len(output_files)}ファイル処理")
 
         return output_files
 
+    except pd.errors.EmptyDataError:
+        raise ExtractRoutingError(f"空のCSVファイルです: {input_path}")
+
+    except pd.errors.ParserError as e:
+        raise ExtractRoutingError(
+            f"CSVの解析に失敗しました: {input_path}, エラー: {str(e)}"
+        )
+
     except Exception as e:
+        if isinstance(e, ExtractRoutingError):
+            raise
         raise ExtractRoutingError(f"routing抽出処理中にエラーが発生しました: {str(e)}")
 
 
@@ -181,29 +138,29 @@ def main():
     output_dir = project_root / "routed_logs"
 
     print("=" * 60)
-    print("Juniper Syslog Filter - routing抽出モジュール")
+    print("Juniper Syslog Filter - routing抽出 (pandas版)")
     print("=" * 60)
 
+    # 入力ファイルを取得
+    input_files = sorted(input_dir.glob("*.csv"))
+
+    if not input_files:
+        print(f"\n⚠️  入力ファイルが見つかりません: {input_dir}")
+        return 0
+
+    print(f"📄 対象ファイル数: {len(input_files)}")
+    print(f"🔍 抽出パターン: srcIP/port > dstIP/port → srcIP > dstIP")
+    print()
+
     try:
-        # 入力CSVファイルを取得
-        csv_files = sorted(input_dir.glob("*.csv"))
+        routed_files = extract_routing(input_files, output_dir, verbose=True)
 
-        if not csv_files:
-            print(f"\n⚠️  CSVファイルが見つかりませんでした: {input_dir}")
-            return 0
-
-        print(f"\n対象ファイル数: {len(csv_files)}")
-        print(f"抽出パターン: srcIP/port > dstIP/port → srcIP > dstIP")
-        print()
-
-        output_files = extract_routing(csv_files, output_dir, verbose=True)
-
-        if output_files:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成しました")
+        if routed_files:
+            print(f"\n✅ 処理完了: {len(routed_files)}個のファイルを処理しました")
         else:
-            print("\n⚠️  処理するデータがありませんでした")
+            print("\n⚠️  処理されたファイルがありません")
 
-    except Exception as e:
+    except ExtractRoutingError as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")
         return 1
 

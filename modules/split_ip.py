@@ -1,166 +1,130 @@
 """
-split_ip.py - IP分割モジュール
+split_ip.py - IP分割モジュール（pandas版）
 
 責務:
 - routed_logs/*.csv のrouting列を分割
 - routing列から srcIP と dstIP を抽出
 - srcIP, dstIP列をrouting列の後ろに追加
 - splitted_logs/*.csv に出力
+- 内部的にpandasで高速処理
 
 列構造:
     入力: [Timestamp, Hostname, AppName, routing, Message]
     出力: [Timestamp, Hostname, AppName, routing, srcIP, dstIP, Message]
 """
 
-import csv
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Union
+import pandas as pd
 
 
 class SplitIPError(Exception):
-    """IP分割時のカスタム例外"""
+    """IP分割処理のカスタム例外"""
 
     pass
 
 
-def split_routing(routing: str) -> Tuple[str, str]:
+def split_ip(
+    input_files: List[Path], output_dir: Union[str, Path], verbose: bool = True
+) -> List[Path]:
     """
     routing列を srcIP と dstIP に分割
 
-    Args:
-        routing: "srcIP > dstIP" 形式の文字列
+    routing列（"srcIP > dstIP"）を分割し、
+    新しい列 srcIP, dstIP を routing の後ろに追加。
 
-    Returns:
-        (srcIP, dstIP) のタプル、分割できない場合は ("", "")
-
-    Example:
-        >>> split_routing("192.168.1.1 > 10.0.0.5")
-        ("192.168.1.1", "10.0.0.5")
-    """
-    if not routing or routing.strip() == "":
-        return ("", "")
-
-    # " > " で分割
-    parts = routing.split(" > ")
-
-    if len(parts) == 2:
-        return (parts[0].strip(), parts[1].strip())
-    else:
-        return ("", "")
-
-
-def split_ip_from_csv(
-    input_path: Path, output_path: Path, verbose: bool = False
-) -> int:
-    """
-    単一CSVファイルからrouting列を分割してsrcIP, dstIP列を追加
-
-    Args:
-        input_path: 入力CSVファイル
-        output_path: 出力CSVファイル
-        verbose: 詳細ログを出力するか
-
-    Returns:
-        処理した行数
-
-    Raises:
-        FileNotFoundError: 入力ファイルが存在しない場合
-        SplitIPError: 処理中にエラーが発生した場合
-    """
-    if not input_path.exists():
-        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
-
-    try:
-        row_count = 0
-        split_success_count = 0
-
-        with open(input_path, "r", encoding="utf-8", newline="") as infile, open(
-            output_path, "w", encoding="utf-8", newline=""
-        ) as outfile:
-
-            reader = csv.reader(infile)
-            writer = csv.writer(outfile)
-
-            # ヘッダー行処理
-            header = next(reader, None)
-            if header:
-                # srcIP, dstIP列をrouting列の後ろに追加
-                # 入力: [Timestamp, Hostname, AppName, routing, Message]
-                # 出力: [Timestamp, Hostname, AppName, routing, srcIP, dstIP, Message]
-                new_header = header[:4] + ["srcIP", "dstIP"] + [header[4]]
-                writer.writerow(new_header)
-                row_count += 1
-
-            # データ行処理
-            for row in reader:
-                if len(row) >= 5:
-                    # routing列（インデックス3）を分割
-                    routing = row[3]
-                    src_ip, dst_ip = split_routing(routing)
-
-                    if src_ip and dst_ip:
-                        split_success_count += 1
-
-                    # srcIP, dstIP列を挿入
-                    new_row = row[:4] + [src_ip, dst_ip] + [row[4]]
-                    writer.writerow(new_row)
-                    row_count += 1
-
-        if verbose:
-            print(f"  ✓ {row_count}行処理 (IP分割成功: {split_success_count}行)")
-
-        return row_count
-
-    except Exception as e:
-        raise SplitIPError(f"IP分割中にエラーが発生しました: {str(e)}")
-
-
-def split_ip(
-    input_files: List[Path], output_dir: Path, verbose: bool = False
-) -> List[Path]:
-    """
-    複数のCSVファイルからrouting列を分割してsrcIP, dstIP列を追加
+    内部的にpandasで処理し、高速化を実現。
+    出力はCSVファイルとして保存され、パスのリストを返す。
 
     Args:
         input_files: 入力CSVファイルのリスト
-        output_dir: 出力ディレクトリ
+        output_dir: 出力先ディレクトリ
         verbose: 詳細ログを出力するか
 
     Returns:
-        出力されたファイルのリスト
+        List[Path]: 出力されたIP分割済みCSVファイルのPathリスト
 
     Raises:
-        SplitIPError: 処理に失敗した場合
+        SplitIPError: IP分割処理に失敗した場合
+
+    Examples:
+        >>> files = split_ip(csv_files, "splitted_logs")
     """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     if not input_files:
         if verbose:
-            print("⚠️  処理するファイルがありません")
+            print("⚠️  入力ファイルがありません")
         return []
-
-    # 出力ディレクトリが存在しない場合は作成
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     output_files = []
 
     try:
-        for input_file in sorted(input_files):
-            if verbose:
-                print(f"📄 処理中: {input_file.name}")
+        for input_path in input_files:
+            # pandasでCSVを読み込み
+            df = pd.read_csv(input_path, encoding="utf-8", keep_default_na=False)
 
-            # 出力ファイル名は入力と同じ
-            output_path = output_dir / input_file.name
+            # routing列の存在確認
+            if "routing" not in df.columns:
+                raise SplitIPError(f"routing列が見つかりません: {input_path.name}")
 
-            # IP分割処理
-            split_ip_from_csv(input_file, output_path, verbose=verbose)
+            # routing列を " > " で分割（ベクトル演算）
+            # expand=True で別々の列に分割
+            split_result = df["routing"].str.split(" > ", expand=True, n=1)
+
+            # 分割結果を srcIP, dstIP 列として追加
+            # 分割できない場合（routing列が空）は空文字列
+            df["srcIP"] = split_result[0] if 0 in split_result.columns else ""
+            df["dstIP"] = split_result[1] if 1 in split_result.columns else ""
+
+            # NaNを空文字列に変換
+            df["srcIP"] = df["srcIP"].fillna("")
+            df["dstIP"] = df["dstIP"].fillna("")
+
+            # 列の順序を調整: routing の後ろに srcIP, dstIP を配置
+            # 入力: [Timestamp, Hostname, AppName, routing, Message]
+            # 出力: [Timestamp, Hostname, AppName, routing, srcIP, dstIP, Message]
+            cols = df.columns.tolist()
+
+            # srcIP, dstIP を routing の後ろに移動
+            cols.remove("srcIP")
+            cols.remove("dstIP")
+            routing_idx = cols.index("routing")
+            cols.insert(routing_idx + 1, "srcIP")
+            cols.insert(routing_idx + 2, "dstIP")
+
+            df = df[cols]
+
+            # 出力ファイル名を生成（入力と同じファイル名）
+            output_path = output_dir / input_path.name
+
+            # pandasでCSVとして出力（NaNを空文字列として保存）
+            df.to_csv(output_path, index=False, encoding="utf-8", na_rep="")
 
             output_files.append(output_path)
 
-        if verbose:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成")
+            if verbose:
+                # IP分割成功数をカウント
+                split_success_count = ((df["srcIP"] != "") & (df["dstIP"] != "")).sum()
+                print(
+                    f"  ✓ {input_path.name}: {len(df)}行処理 (IP分割成功: {split_success_count}行)"
+                )
+
+        if verbose and output_files:
+            print(f"\n✅ IP分割完了: {len(output_files)}ファイル処理")
 
         return output_files
 
+    except pd.errors.EmptyDataError:
+        raise SplitIPError(f"空のCSVファイルです: {input_path}")
+
+    except pd.errors.ParserError as e:
+        raise SplitIPError(f"CSVの解析に失敗しました: {input_path}, エラー: {str(e)}")
+
     except Exception as e:
+        if isinstance(e, SplitIPError):
+            raise
         raise SplitIPError(f"IP分割処理中にエラーが発生しました: {str(e)}")
 
 
@@ -174,29 +138,29 @@ def main():
     output_dir = project_root / "splitted_logs"
 
     print("=" * 60)
-    print("Juniper Syslog Filter - IP分割モジュール")
+    print("Juniper Syslog Filter - IP分割 (pandas版)")
     print("=" * 60)
 
+    # 入力ファイルを取得
+    input_files = sorted(input_dir.glob("*.csv"))
+
+    if not input_files:
+        print(f"\n⚠️  入力ファイルが見つかりません: {input_dir}")
+        return 0
+
+    print(f"📄 対象ファイル数: {len(input_files)}")
+    print(f"🔍 分割パターン: routing → srcIP, dstIP")
+    print()
+
     try:
-        # 入力CSVファイルを取得
-        csv_files = sorted(input_dir.glob("*.csv"))
+        splitted_files = split_ip(input_files, output_dir, verbose=True)
 
-        if not csv_files:
-            print(f"\n⚠️  CSVファイルが見つかりませんでした: {input_dir}")
-            return 0
-
-        print(f"\n対象ファイル数: {len(csv_files)}")
-        print(f"分割パターン: routing → srcIP, dstIP")
-        print()
-
-        output_files = split_ip(csv_files, output_dir, verbose=True)
-
-        if output_files:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成しました")
+        if splitted_files:
+            print(f"\n✅ 処理完了: {len(splitted_files)}個のファイルを処理しました")
         else:
-            print("\n⚠️  処理するデータがありませんでした")
+            print("\n⚠️  処理されたファイルがありません")
 
-    except Exception as e:
+    except SplitIPError as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")
         return 1
 

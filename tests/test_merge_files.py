@@ -1,119 +1,119 @@
 """
-test_merge_files.py - merge_files.pyモジュールのテストコード
+test_merge_files.py - merge_files.pyのテストコード
+
+CSVマージ機能（pandas + ファイル出力版）をテスト
 """
 
 import pytest
+import pandas as pd
 import csv
 from pathlib import Path
-import tempfile
-
 from modules.merge_files import merge_csv_files, MergeError
 
 
 @pytest.fixture
-def temp_dirs():
-    """テスト用の一時ディレクトリを作成"""
-    with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
-        yield Path(input_dir), Path(output_dir)
+def temp_dir(tmp_path):
+    """一時ディレクトリのフィクスチャ"""
+    return tmp_path
 
 
-def create_test_csv(path: Path, row_count: int):
-    """テスト用のCSVファイルを作成"""
-    with open(path, "w", newline="", encoding="utf-8") as f:
+def create_test_csv(csv_path: Path, row_count: int):
+    """テスト用CSVファイルを作成（指定行数）"""
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        # ヘッダー
         writer.writerow(["Timestamp", "Hostname", "AppName", "Message"])
-        # データ行
+
         for i in range(row_count):
             writer.writerow(
-                [f"2025-12-16T00:00:{i:02d}Z", "srx-fw01", "RT_IDP", f"Message {i}"]
+                [
+                    f"2025-12-16T{i % 24:02d}:00:00Z",
+                    "srx-fw01",
+                    "RT_IDP",
+                    f"RT_IDP_ATTACK_LOG: Test message {i}",
+                ]
             )
 
 
-# ============================================================================
-# merge_csv_files 関数のテスト
-# ============================================================================
+class TestMergeCsvFiles:
+    """merge_csv_files関数のテスト"""
 
+    def test_merge_multiple_files_under_limit(self, temp_dir):
+        """正常系: 複数ファイルをマージ（80万行以下）"""
+        # 3つのCSVファイルを作成（各100行）
+        input_files = []
+        for i in range(3):
+            csv_path = temp_dir / f"test{i}.csv"
+            create_test_csv(csv_path, 100)
+            input_files.append(csv_path)
 
-def test_merge_csv_files_small_files(temp_dirs):
-    """小さいファイルのマージテスト（1ファイルに収まる）"""
-    input_dir, output_dir = temp_dirs
+        output_dir = temp_dir / "output"
 
-    # 3つの小さいCSVを作成（合計300行）
-    input_files = []
-    for i in range(3):
-        csv_path = input_dir / f"test_{i:02d}.csv"
-        create_test_csv(csv_path, 100)
-        input_files.append(csv_path)
+        # 実行
+        result = merge_csv_files(
+            input_files, output_dir, max_rows=800000, verbose=False
+        )
 
-    # マージ実行（max_rows=1000）
-    output_files = merge_csv_files(
-        input_files, output_dir, max_rows=1000, verbose=False
-    )
+        # 検証: 1つのマージファイルが作成される
+        assert len(result) == 1
+        assert result[0].exists()
 
-    # 検証: 1ファイルにまとまる
-    assert len(output_files) == 1
-    assert output_files[0].name == "merged_001.csv"
+        # マージされたファイルの内容を確認
+        df = pd.read_csv(result[0])
+        assert len(df) == 300  # 100行 × 3ファイル
 
-    # 行数確認（ヘッダー + 300行）
-    with open(output_files[0], "r", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
-        assert len(rows) == 301  # ヘッダー + 300行
+    def test_merge_split_over_limit(self, temp_dir):
+        """正常系: 80万行超えで分割される"""
+        # 2つのCSVファイルを作成（合計で制限を超える）
+        csv_path1 = temp_dir / "test1.csv"
+        csv_path2 = temp_dir / "test2.csv"
+        create_test_csv(csv_path1, 600)
+        create_test_csv(csv_path2, 600)
 
+        input_files = [csv_path1, csv_path2]
+        output_dir = temp_dir / "output"
 
-def test_merge_csv_files_split(temp_dirs):
-    """ファイル分割のテスト（max_rowsを超える場合）"""
-    input_dir, output_dir = temp_dirs
+        # 実行（max_rows=1000で分割）
+        result = merge_csv_files(input_files, output_dir, max_rows=1000, verbose=False)
 
-    # 2つのCSVを作成（合計200行）
-    input_files = []
-    for i in range(2):
-        csv_path = input_dir / f"test_{i:02d}.csv"
-        create_test_csv(csv_path, 100)
-        input_files.append(csv_path)
+        # 検証: 2つのファイルに分割される（1200行 → 1000行 + 200行）
+        assert len(result) == 2
 
-    # マージ実行（max_rows=150で分割される）
-    output_files = merge_csv_files(input_files, output_dir, max_rows=150, verbose=False)
+        df1 = pd.read_csv(result[0])
+        df2 = pd.read_csv(result[1])
+        assert len(df1) == 1000
+        assert len(df2) == 200
 
-    # 検証: 2ファイルに分割される
-    assert len(output_files) == 2
-    assert output_files[0].name == "merged_001.csv"
-    assert output_files[1].name == "merged_002.csv"
+    def test_merge_skip_empty_files(self, temp_dir):
+        """正常系: 空ファイルはスキップされる"""
+        # 通常のファイルと空のファイルを作成
+        csv_path1 = temp_dir / "test1.csv"
+        csv_path2 = temp_dir / "empty.csv"
+        csv_path3 = temp_dir / "test3.csv"
 
-    # 1つ目のファイル: 150行
-    with open(output_files[0], "r", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
-        assert len(rows) == 151  # ヘッダー + 150行
+        create_test_csv(csv_path1, 50)
+        csv_path2.write_text("")  # 空ファイル
+        create_test_csv(csv_path3, 50)
 
-    # 2つ目のファイル: 50行
-    with open(output_files[1], "r", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
-        assert len(rows) == 51  # ヘッダー + 50行
+        input_files = [csv_path1, csv_path2, csv_path3]
+        output_dir = temp_dir / "output"
 
+        # 実行（空ファイルはスキップされる）
+        result = merge_csv_files(input_files, output_dir, verbose=False)
 
-def test_merge_csv_files_empty_list(temp_dirs):
-    """入力ファイルが空の場合のテスト"""
-    input_dir, output_dir = temp_dirs
+        # 検証: 100行のマージファイルが作成される（50 + 50）
+        assert len(result) == 1
+        df = pd.read_csv(result[0])
+        assert len(df) == 100
 
-    output_files = merge_csv_files([], output_dir, verbose=False)
+    def test_merge_empty_input_list(self, temp_dir):
+        """正常系: 入力ファイルが空リストの場合は空リストを返す"""
+        output_dir = temp_dir / "output"
 
-    # 検証: 空のリストが返る
-    assert output_files == []
+        # 実行
+        result = merge_csv_files([], output_dir, verbose=False)
 
+        # 検証: 空リスト
+        assert result == []
 
-def test_merge_csv_files_file_not_found(temp_dirs):
-    """存在しないファイルのテスト"""
-    input_dir, output_dir = temp_dirs
-
-    nonexistent_file = input_dir / "nonexistent.csv"
-
-    with pytest.raises(MergeError):
-        merge_csv_files([nonexistent_file], output_dir, verbose=False)
-
-
-# ============================================================================
-# 実行
-# ============================================================================
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        # 出力ファイルも作成されない
+        assert not list(output_dir.glob("*.csv"))

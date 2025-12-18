@@ -1,31 +1,26 @@
 """
-test_reduce_columns.py - reduce_columns.pyモジュールのテストコード
+test_reduce_columns.py - reduce_columns.pyのテストコード
+
+列削減機能（pandas + ファイル出力版）をテスト
 """
 
 import pytest
+import pandas as pd
 import csv
 from pathlib import Path
-import tempfile
-
-from modules.reduce_columns import (
-    reduce_csv_columns,
-    reduce_columns,
-    ReduceColumnsError,
-)
+from modules.reduce_columns import reduce_columns, ReduceColumnsError
 
 
 @pytest.fixture
-def temp_dirs():
-    """テスト用の一時ディレクトリを作成"""
-    with tempfile.TemporaryDirectory() as input_dir, tempfile.TemporaryDirectory() as output_dir:
-        yield Path(input_dir), Path(output_dir)
+def temp_dir(tmp_path):
+    """一時ディレクトリのフィクスチャ"""
+    return tmp_path
 
 
-def create_test_csv(path: Path, row_count: int = 5):
-    """テスト用のCSVファイルを作成"""
-    with open(path, "w", newline="", encoding="utf-8") as f:
+def create_test_csv(csv_path: Path, rows: list):
+    """テスト用CSVファイルを作成"""
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        # ヘッダー（7列）
         writer.writerow(
             [
                 "Timestamp",
@@ -37,142 +32,134 @@ def create_test_csv(path: Path, row_count: int = 5):
                 "Message",
             ]
         )
-        # データ行
-        for i in range(row_count):
-            writer.writerow(
-                [
-                    f"2025-12-16T00:00:{i:02d}Z",
-                    "srx-fw01",
-                    "RT_IDP",
-                    "2",
-                    "CRITICAL",
-                    "THREAT",
-                    f"RT_IDP_ATTACK_LOG: Attack {i}",
-                ]
+        writer.writerows(rows)
+
+
+class TestReduceColumns:
+    """reduce_columns関数のテスト"""
+
+    def test_reduce_columns_basic(self, temp_dir):
+        """正常系: 列削減が正しく動作する"""
+        # テストデータ作成（7列）
+        rows = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                2,
+                "CRITICAL",
+                "THREAT",
+                "RT_IDP_ATTACK_LOG: SQL injection detected",
+            ],
+            [
+                "2025-12-16T00:01:00Z",
+                "srx-fw01",
+                "RT_FLOW",
+                6,
+                "INFO",
+                "NORMAL",
+                "RT_FLOW_SESSION_CREATE: session created",
+            ],
+        ]
+
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
+
+        # 実行（列0,1,2,6のみ保持）
+        result = reduce_columns(
+            [input_path], output_dir, keep_columns=[0, 1, 2, 6], verbose=False
+        )
+
+        # 検証: ファイルが作成される
+        assert len(result) == 1
+        assert result[0].exists()
+
+        # 出力ファイルの内容を検証
+        df = pd.read_csv(result[0])
+        assert len(df.columns) == 4  # 7列 → 4列
+        assert list(df.columns) == ["Timestamp", "Hostname", "AppName", "Message"]
+        assert len(df) == 2  # 行数は変わらない
+
+    def test_reduce_columns_multiple_files(self, temp_dir):
+        """正常系: 複数ファイルの処理"""
+        rows1 = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                2,
+                "CRITICAL",
+                "THREAT",
+                "Message 1",
+            ]
+        ]
+        rows2 = [
+            [
+                "2025-12-16T01:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                2,
+                "CRITICAL",
+                "THREAT",
+                "Message 2",
+            ]
+        ]
+
+        input_path1 = temp_dir / "test1.csv"
+        input_path2 = temp_dir / "test2.csv"
+        output_dir = temp_dir / "output"
+
+        create_test_csv(input_path1, rows1)
+        create_test_csv(input_path2, rows2)
+
+        # 実行
+        result = reduce_columns(
+            [input_path1, input_path2],
+            output_dir,
+            keep_columns=[0, 2, 6],
+            verbose=False,
+        )
+
+        # 検証: 2ファイルが処理される
+        assert len(result) == 2
+
+        # 各ファイルの列数を確認
+        df1 = pd.read_csv(result[0])
+        df2 = pd.read_csv(result[1])
+        assert len(df1.columns) == 3
+        assert len(df2.columns) == 3
+
+    def test_reduce_columns_invalid_index(self, temp_dir):
+        """異常系: 範囲外の列インデックス"""
+        rows = [
+            [
+                "2025-12-16T00:00:00Z",
+                "srx-fw01",
+                "RT_IDP",
+                2,
+                "CRITICAL",
+                "THREAT",
+                "Message",
+            ]
+        ]
+
+        input_path = temp_dir / "test.csv"
+        output_dir = temp_dir / "output"
+        create_test_csv(input_path, rows)
+
+        # 実行（列インデックス10は範囲外）
+        with pytest.raises(ReduceColumnsError, match="列インデックス.*が範囲外です"):
+            reduce_columns(
+                [input_path], output_dir, keep_columns=[0, 1, 10], verbose=False
             )
 
+    def test_reduce_columns_empty_input_list(self, temp_dir):
+        """正常系: 入力が空リストの場合は空リストを返す"""
+        output_dir = temp_dir / "output"
 
-# ============================================================================
-# reduce_csv_columns 関数のテスト
-# ============================================================================
+        # 実行
+        result = reduce_columns([], output_dir, verbose=False)
 
-
-def test_reduce_csv_columns_default(temp_dirs):
-    """デフォルト列削減のテスト（Timestamp, Hostname, AppName, Message）"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "test.csv"
-    output_path = output_dir / "reduced.csv"
-
-    # テストCSVを作成
-    create_test_csv(input_path, row_count=3)
-
-    # 列削減実行（デフォルト: [0, 1, 2, 6]）
-    row_count = reduce_csv_columns(input_path, output_path, keep_columns=[0, 1, 2, 6])
-
-    # 検証: 4行処理（ヘッダー + 3行）
-    assert row_count == 4
-    assert output_path.exists()
-
-    # 出力ファイルの内容を確認
-    with open(output_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-
-        # ヘッダー確認（4列）
-        assert len(rows[0]) == 4
-        assert rows[0] == ["Timestamp", "Hostname", "AppName", "Message"]
-
-        # データ行確認（4列）
-        assert len(rows[1]) == 4
-        assert rows[1][0].startswith("2025-12-16")
-        assert rows[1][1] == "srx-fw01"
-        assert rows[1][2] == "RT_IDP"
-        assert "RT_IDP_ATTACK_LOG" in rows[1][3]
-
-
-def test_reduce_csv_columns_custom(temp_dirs):
-    """カスタム列削減のテスト（Timestamp と Message のみ）"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "test.csv"
-    output_path = output_dir / "reduced.csv"
-
-    # テストCSVを作成
-    create_test_csv(input_path, row_count=2)
-
-    # 列削減実行（カスタム: [0, 6]）
-    row_count = reduce_csv_columns(input_path, output_path, keep_columns=[0, 6])
-
-    # 検証: 3行処理（ヘッダー + 2行）
-    assert row_count == 3
-
-    # 出力ファイルの内容を確認
-    with open(output_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-
-        # ヘッダー確認（2列）
-        assert len(rows[0]) == 2
-        assert rows[0] == ["Timestamp", "Message"]
-
-        # データ行確認（2列）
-        assert len(rows[1]) == 2
-
-
-def test_reduce_csv_columns_file_not_found(temp_dirs):
-    """存在しないファイルのテスト"""
-    input_dir, output_dir = temp_dirs
-    input_path = input_dir / "nonexistent.csv"
-    output_path = output_dir / "reduced.csv"
-
-    with pytest.raises(FileNotFoundError):
-        reduce_csv_columns(input_path, output_path, keep_columns=[0, 1, 2, 6])
-
-
-# ============================================================================
-# reduce_columns 関数のテスト
-# ============================================================================
-
-
-def test_reduce_columns_multiple_files(temp_dirs):
-    """複数ファイルの列削減テスト"""
-    input_dir, output_dir = temp_dirs
-
-    # 3つのテストCSVを作成
-    input_files = []
-    for i in range(3):
-        csv_path = input_dir / f"test_{i:02d}.csv"
-        create_test_csv(csv_path, row_count=5)
-        input_files.append(csv_path)
-
-    # 列削減実行
-    output_files = reduce_columns(
-        input_files, output_dir, keep_columns=[0, 1, 2, 6], verbose=False
-    )
-
-    # 検証: 3ファイル作成
-    assert len(output_files) == 3
-
-    # 各ファイルが4列になっているか確認
-    for output_file in output_files:
-        with open(output_file, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader)
-            assert len(header) == 4
-
-
-def test_reduce_columns_empty_list(temp_dirs):
-    """入力ファイルが空の場合のテスト"""
-    input_dir, output_dir = temp_dirs
-
-    output_files = reduce_columns([], output_dir, verbose=False)
-
-    # 検証: 空のリストが返る
-    assert output_files == []
-
-
-# ============================================================================
-# 実行
-# ============================================================================
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        # 検証: 空リスト
+        assert result == []

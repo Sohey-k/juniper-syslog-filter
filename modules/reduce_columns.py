@@ -1,133 +1,109 @@
 """
-reduce_columns.py - 列削減モジュール
+reduce_columns.py - 列削減モジュール（pandas版）
 
 責務:
-- merged_logs/*.csv から不要な列を削除
-- 指定された列インデックスのみ保持
+- merged_logs/*.csv から不要列を削除
+- 指定された列のみを保持
 - reduced_logs/*.csv に出力
-
-列インデックス:
-    0: Timestamp
-    1: Hostname
-    2: AppName
-    3: SeverityLevel
-    4: Severity
-    5: LogType
-    6: Message
+- 内部的にpandasで高速処理
 """
 
-import csv
 from pathlib import Path
-from typing import List
+from typing import List, Union
+import pandas as pd
 
 
 class ReduceColumnsError(Exception):
-    """列削減時のカスタム例外"""
+    """列削減処理のカスタム例外"""
 
     pass
 
 
-def reduce_csv_columns(
-    input_path: Path, output_path: Path, keep_columns: List[int]
-) -> int:
-    """
-    単一CSVファイルから指定列のみ抽出
-
-    Args:
-        input_path: 入力CSVファイル
-        output_path: 出力CSVファイル
-        keep_columns: 保持する列のインデックスリスト（0始まり）
-
-    Returns:
-        処理した行数
-
-    Raises:
-        FileNotFoundError: 入力ファイルが存在しない場合
-        ReduceColumnsError: 処理中にエラーが発生した場合
-    """
-    if not input_path.exists():
-        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
-
-    try:
-        row_count = 0
-
-        with open(input_path, "r", encoding="utf-8", newline="") as infile, open(
-            output_path, "w", encoding="utf-8", newline=""
-        ) as outfile:
-
-            reader = csv.reader(infile)
-            writer = csv.writer(outfile)
-
-            for row in reader:
-                # 指定された列のみ抽出
-                reduced_row = [row[i] for i in keep_columns if i < len(row)]
-                writer.writerow(reduced_row)
-                row_count += 1
-
-        return row_count
-
-    except Exception as e:
-        raise ReduceColumnsError(f"列削減中にエラーが発生しました: {str(e)}")
-
-
 def reduce_columns(
     input_files: List[Path],
-    output_dir: Path,
-    keep_columns: List[int] = [
-        0,
-        1,
-        2,
-        6,
-    ],  # デフォルト: Timestamp, Hostname, AppName, Message
-    verbose: bool = False,
+    output_dir: Union[str, Path],
+    keep_columns: List[int] = [0, 1, 2, 6],
+    verbose: bool = True,
 ) -> List[Path]:
     """
-    複数のCSVファイルから指定列のみ抽出
+    CSVファイルから指定された列のみを保持
+
+    内部的にpandasで処理し、高速化を実現。
+    出力はCSVファイルとして保存され、パスのリストを返す。
 
     Args:
         input_files: 入力CSVファイルのリスト
-        output_dir: 出力ディレクトリ
-        keep_columns: 保持する列のインデックスリスト（デフォルト: [0, 1, 2, 6]）
+        output_dir: 出力先ディレクトリ
+        keep_columns: 保持する列のインデックスリスト（デフォルト: [0,1,2,6]）
         verbose: 詳細ログを出力するか
 
     Returns:
-        出力されたファイルのリスト
+        List[Path]: 出力された列削減済みCSVファイルのPathリスト
 
     Raises:
-        ReduceColumnsError: 処理に失敗した場合
+        ReduceColumnsError: 列削減処理に失敗した場合
+
+    Examples:
+        >>> files = reduce_columns(csv_files, "reduced_logs")
+        >>> files = reduce_columns(csv_files, "reduced_logs", keep_columns=[0,1,2])
     """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     if not input_files:
         if verbose:
-            print("⚠️  処理するファイルがありません")
+            print("⚠️  入力ファイルがありません")
         return []
-
-    # 出力ディレクトリが存在しない場合は作成
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     output_files = []
 
     try:
-        for input_file in sorted(input_files):
-            if verbose:
-                print(f"📄 処理中: {input_file.name}")
+        for input_path in input_files:
+            # pandasでCSVを読み込み
+            df = pd.read_csv(input_path, encoding="utf-8")
 
-            # 出力ファイル名は入力と同じ
-            output_path = output_dir / input_file.name
+            # 列数の検証
+            total_columns = len(df.columns)
 
-            # 列削減処理
-            row_count = reduce_csv_columns(input_file, output_path, keep_columns)
+            # keep_columnsの範囲チェック
+            for col_idx in keep_columns:
+                if col_idx >= total_columns or col_idx < 0:
+                    raise ReduceColumnsError(
+                        f"列インデックス {col_idx} が範囲外です（0-{total_columns-1}）: {input_path.name}"
+                    )
+
+            # 指定された列のみを選択
+            reduced_df = df.iloc[:, keep_columns]
+
+            # 出力ファイル名を生成（入力と同じファイル名）
+            output_path = output_dir / input_path.name
+
+            # pandasでCSVとして出力
+            reduced_df.to_csv(output_path, index=False, encoding="utf-8")
 
             output_files.append(output_path)
 
             if verbose:
-                print(f"  ✓ {row_count}行処理 → {output_path.name}")
+                print(
+                    f"  ✓ {input_path.name}: {len(df.columns)}列 → {len(reduced_df.columns)}列"
+                )
 
-        if verbose:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成")
+        if verbose and output_files:
+            print(f"\n✅ 列削減完了: {len(output_files)}ファイル処理")
 
         return output_files
 
+    except pd.errors.EmptyDataError:
+        raise ReduceColumnsError(f"空のCSVファイルです: {input_path}")
+
+    except pd.errors.ParserError as e:
+        raise ReduceColumnsError(
+            f"CSVの解析に失敗しました: {input_path}, エラー: {str(e)}"
+        )
+
     except Exception as e:
+        if isinstance(e, ReduceColumnsError):
+            raise
         raise ReduceColumnsError(f"列削減処理中にエラーが発生しました: {str(e)}")
 
 
@@ -141,31 +117,31 @@ def main():
     output_dir = project_root / "reduced_logs"
 
     print("=" * 60)
-    print("Juniper Syslog Filter - 列削減モジュール")
+    print("Juniper Syslog Filter - 列削減 (pandas版)")
     print("=" * 60)
 
+    # 入力ファイルを取得
+    input_files = sorted(input_dir.glob("*.csv"))
+
+    if not input_files:
+        print(f"\n⚠️  入力ファイルが見つかりません: {input_dir}")
+        return 0
+
+    print(f"📄 対象ファイル数: {len(input_files)}")
+    print(f"📋 保持する列: [0, 1, 2, 6] (Timestamp, Hostname, AppName, Message)")
+    print()
+
     try:
-        # 入力CSVファイルを取得
-        csv_files = sorted(input_dir.glob("*.csv"))
-
-        if not csv_files:
-            print(f"\n⚠️  CSVファイルが見つかりませんでした: {input_dir}")
-            return 0
-
-        print(f"\n対象ファイル数: {len(csv_files)}")
-        print(f"保持する列: [0, 1, 2, 6] (Timestamp, Hostname, AppName, Message)")
-        print()
-
-        output_files = reduce_columns(
-            csv_files, output_dir, keep_columns=[0, 1, 2, 6], verbose=True
+        reduced_files = reduce_columns(
+            input_files, output_dir, keep_columns=[0, 1, 2, 6], verbose=True
         )
 
-        if output_files:
-            print(f"\n✅ 処理完了: {len(output_files)}個のファイルを作成しました")
+        if reduced_files:
+            print(f"\n✅ 処理完了: {len(reduced_files)}個のファイルを処理しました")
         else:
-            print("\n⚠️  処理するデータがありませんでした")
+            print("\n⚠️  処理されたファイルがありません")
 
-    except Exception as e:
+    except ReduceColumnsError as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")
         return 1
 

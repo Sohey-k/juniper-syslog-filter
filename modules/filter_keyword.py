@@ -1,124 +1,97 @@
 """
-filter_keyword.py - キーワードフィルタリングモジュール
+filter_keyword.py - キーワードフィルタモジュール（pandas版）
 
 責務:
-- temp_extracted/*.csv から [RT_IDP_ATTACK] を含む行のみ抽出
+- temp_extracted/*.csv から RT_IDP_ATTACK を含む行を抽出
 - filtered_logs/*.csv に出力
+- 内部的にpandasで高速処理
 """
 
-import csv
 from pathlib import Path
-from typing import List
+from typing import List, Union
+import pandas as pd
 
 
 class FilterError(Exception):
-    """フィルタリング時のカスタム例外"""
+    """フィルタリング処理のカスタム例外"""
+
     pass
 
 
-def filter_csv_by_keyword(input_path: Path, output_path: Path, keyword: str) -> int:
+def filter_keyword(
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    keyword: str = "RT_IDP_ATTACK",
+) -> int:
     """
-    単一CSVファイルからキーワードを含む行のみ抽出
-    
-    Args:
-        input_path: 入力CSVファイルのパス
-        output_path: 出力CSVファイルのパス
-        keyword: フィルタリングするキーワード
-        
-    Returns:
-        抽出された行数
-        
-    Raises:
-        FilterError: フィルタリングに失敗した場合
-        FileNotFoundError: 入力ファイルが存在しない場合
-    """
-    if not input_path.exists():
-        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
-    
-    # 出力ディレクトリが存在しない場合は作成
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        filtered_rows = []
-        header = None
-        
-        # CSVを読み込み
-        with open(input_path, 'r', encoding='utf-8', newline='') as f:
-            reader = csv.reader(f)
-            
-            # ヘッダー行を取得
-            header = next(reader, None)
-            if header is None:
-                raise FilterError(f"CSVファイルが空です: {input_path}")
-            
-            # キーワードを含む行のみフィルタリング
-            for row in reader:
-                # Message列（7列目、インデックス6）にキーワードが含まれているか確認
-                if len(row) > 6 and keyword in row[6]:
-                    filtered_rows.append(row)
-        
-        # フィルタリング結果を出力
-        with open(output_path, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            writer.writerows(filtered_rows)
-        
-        return len(filtered_rows)
-        
-    except Exception as e:
-        raise FilterError(f"フィルタリング中にエラーが発生しました: {input_path}, エラー: {str(e)}")
+    CSVファイルをキーワードでフィルタリング
 
+    Message列に指定されたキーワードを含む行のみを抽出し、
+    ファイルとして出力する。内部的にpandasで高速処理。
 
-def filter_keyword(csv_files: List[Path], output_dir: Path, keyword: str = "RT_IDP_ATTACK", verbose: bool = False) -> int:
-    """
-    複数のCSVファイルからキーワードを含む行のみ抽出
-    
     Args:
-        csv_files: 入力CSVファイルのパスリスト
-        output_dir: 出力ディレクトリ
-        keyword: フィルタリングするキーワード
-        verbose: 詳細ログを出力するか
-        
+        input_files: 入力CSVファイルのリスト
+        output_dir: 出力先ディレクトリ
+        keyword: フィルタキーワード（デフォルト: "RT_IDP_ATTACK"）
+
     Returns:
-        全ファイルで抽出された総行数
-        
+        int: フィルタ後の総行数
+
     Raises:
-        FilterError: フィルタリングに失敗した場合
+        FilterError: フィルタリング処理に失敗した場合
+
+    Examples:
+        >>> count = filter_keyword(csv_files, "filtered_logs")
+        >>> count = filter_keyword(csv_files, "filtered_logs", keyword="RT_SCREEN")
     """
-    if not csv_files:
-        if verbose:
-            print("⚠️  フィルタリングするCSVファイルがありません")
-        return 0
-    
-    total_filtered = 0
-    success_count = 0
-    error_count = 0
-    
-    for csv_path in csv_files:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    total_rows = 0
+
+    for input_path in input_files:
         try:
-            if verbose:
-                print(f"🔍 フィルタリング中: {csv_path.name}...", end=" ")
-            
-            # 出力ファイル名は入力ファイル名と同じ
-            output_path = output_dir / csv_path.name
-            
-            filtered_count = filter_csv_by_keyword(csv_path, output_path, keyword)
-            total_filtered += filtered_count
-            success_count += 1
-            
-            if verbose:
-                print(f"✓ ({filtered_count}行抽出)")
-                
-        except (FilterError, FileNotFoundError) as e:
-            error_count += 1
-            if verbose:
-                print(f"✗ エラー: {str(e)}")
-    
-    if verbose:
-        print(f"\n✅ フィルタリング完了: {success_count}個成功, {error_count}個失敗")
-        print(f"📊 総抽出行数: {total_filtered}行")
-    
-    return total_filtered
+            # pandasでCSVを読み込み
+            df = pd.read_csv(input_path, encoding="utf-8")
+
+            # Message列の存在確認
+            if "Message" not in df.columns:
+                raise FilterError(f"Message列が見つかりません: {input_path}")
+
+            # キーワードでフィルタリング（部分一致、大文字小文字区別）
+            filtered_df = df[
+                df["Message"].str.contains(
+                    keyword,
+                    case=True,  # 大文字小文字を区別
+                    na=False,  # NaNはFalse扱い（除外）
+                )
+            ]
+
+            # フィルタ後に行が存在する場合のみ出力
+            if len(filtered_df) > 0:
+                # 出力ファイル名を生成（入力と同じファイル名）
+                output_path = output_dir / input_path.name
+
+                # pandasでCSVとして出力
+                filtered_df.to_csv(output_path, index=False, encoding="utf-8")
+
+                total_rows += len(filtered_df)
+
+        except pd.errors.EmptyDataError:
+            # 空のCSVファイルはスキップ
+            continue
+
+        except pd.errors.ParserError as e:
+            raise FilterError(
+                f"CSVの解析に失敗しました: {input_path}, エラー: {str(e)}"
+            )
+
+        except Exception as e:
+            raise FilterError(
+                f"フィルタリング中にエラーが発生しました: {input_path}, エラー: {str(e)}"
+            )
+
+    return total_rows
 
 
 def main():
@@ -129,34 +102,31 @@ def main():
     project_root = Path(__file__).parent.parent
     input_dir = project_root / "temp_extracted"
     output_dir = project_root / "filtered_logs"
-    
+
     print("=" * 60)
-    print("Juniper Syslog Filter - キーワードフィルタリングモジュール")
+    print("Juniper Syslog Filter - キーワードフィルタ (pandas版)")
     print("=" * 60)
-    
+
+    # 入力ファイルを取得
+    input_files = sorted(input_dir.glob("*.csv"))
+
+    if not input_files:
+        print(f"\n⚠️  入力ファイルが見つかりません: {input_dir}")
+        return 0
+
+    print(f"📄 対象ファイル数: {len(input_files)}")
+    print(f"🔍 キーワード: RT_IDP_ATTACK")
+
     try:
-        # 入力CSVファイルを取得
-        csv_files = sorted(input_dir.glob("*.csv"))
-        
-        if not csv_files:
-            print(f"\n⚠️  CSVファイルが見つかりませんでした: {input_dir}")
-            return 0
-        
-        print(f"\n対象ファイル数: {len(csv_files)}")
-        print(f"フィルタリングキーワード: RT_IDP_ATTACK")
-        print()
-        
-        total_filtered = filter_keyword(csv_files, output_dir, keyword="RT_IDP_ATTACK", verbose=True)
-        
-        if total_filtered > 0:
-            print(f"\n✅ 処理完了: {total_filtered}行を抽出しました")
-        else:
-            print("\n⚠️  抽出された行がありません")
-            
-    except Exception as e:
+        total_rows = filter_keyword(input_files, output_dir, keyword="RT_IDP_ATTACK")
+
+        print(f"\n✅ フィルタリング完了")
+        print(f"📊 抽出された行数: {total_rows:,}")
+
+    except FilterError as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")
         return 1
-    
+
     return 0
 
 
