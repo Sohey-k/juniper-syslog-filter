@@ -20,6 +20,10 @@ from modules.reduce_columns import reduce_columns
 from modules.extract_routing import extract_routing
 from modules.split_ip import split_ip
 from modules.classify_ip import classify_ip
+from modules.extract_protocol import extract_protocol
+from modules.extract_severity_level import extract_severity_level
+from modules.extract_severity import extract_severity
+from modules.filter_critical_and_merge import filter_and_merge_critical
 
 
 def main():
@@ -34,11 +38,14 @@ def main():
     source_dir = project_root / "source_logs"
     temp_dir = project_root / "temp_extracted"
     filtered_dir = project_root / "filtered_logs"
-    merged_dir = project_root / "merged_logs"  # ← どこからでも見える
+    merged_dir = project_root / "merged_logs"
     reduced_dir = project_root / "reduced_logs"
     routed_dir = project_root / "routed_logs"
     splitted_dir = project_root / "splitted_logs"
     classified_dir = project_root / "classified_logs"
+    protocol_dir = project_root / "protocol_extracted"
+    severity_dir = project_root / "severity_level_extracted"
+    severity_extracted_dir = project_root / "severity_extracted"
 
     try:
         # Phase 1: ループ処理（ZIPファイルが無くなるまで）
@@ -222,6 +229,129 @@ def main():
         # splitted_dir/ 内の全CSVを削除
         print(f"  └─ クリーンアップ中...", end=" ")
         cleanup_directory(splitted_dir, "*.csv", verbose=False)
+        print("✓")
+
+        # Phase 7: protocol抽出処理
+        print("\n[Phase 7] protocol抽出処理開始")
+        print("-" * 70)
+
+        # classified_logs/ の全CSVからprotocol列を抽出
+        classified_files = sorted(classified_dir.glob("*.csv"))
+
+        if not classified_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            protocol_dir = project_root / "protocol_extracted"
+            print(f"📄 対象ファイル数: {len(classified_files)}")
+            print(f"抽出パターン: protocol=xxx")
+            print(f"🔍 protocol抽出中...", end=" ")
+
+            protocol_files = extract_protocol(
+                classified_files, protocol_dir, verbose=False
+            )
+
+            print(f"✓ ({len(protocol_files)}ファイル作成)")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 7 完了")
+            print("=" * 70)
+
+        # classified_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(classified_dir, "*.csv", verbose=False)
+        print("✓")
+
+        # Phase 8: SeverityLevel抽出処理
+        print("\n[Phase 8] SeverityLevel抽出処理開始")
+        print("-" * 70)
+
+        # protocol_extracted/ の全CSVからSeverityLevel列を抽出
+        protocol_files = sorted(protocol_dir.glob("*.csv"))
+
+        if not protocol_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            severity_dir = project_root / "severity_level_extracted"
+            print(f"📄 対象ファイル数: {len(protocol_files)}")
+            print(f"抽出パターン: SeverityLevel=数字")
+            print(f"🔍 SeverityLevel抽出中...", end=" ")
+
+            severity_files = extract_severity_level(
+                protocol_files, severity_dir, verbose=False
+            )
+
+            print(f"✓ ({len(severity_files)}ファイル作成)")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 8 完了")
+            print("=" * 70)
+
+        # protocol_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(protocol_dir, "*.csv", verbose=False)
+        print("✓")
+
+        # Phase 9: Severity抽出処理
+        print("\n[Phase 9] Severity抽出処理開始")
+        print("-" * 70)
+
+        # severity_level_extracted/ の全CSVからSeverity列を抽出
+        severity_level_files = sorted(severity_dir.glob("*.csv"))
+
+        if not severity_level_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            severity_extracted_dir = project_root / "severity_extracted"
+            print(f"📄 対象ファイル数: {len(severity_level_files)}")
+            print(f"抽出パターン: Severity=xxx")
+            print(f"🔍 Severity抽出中...", end=" ")
+
+            severity_extracted_files = extract_severity(
+                severity_level_files, severity_extracted_dir, verbose=False
+            )
+
+            print(f"✓ ({len(severity_extracted_files)}ファイル作成)")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 9 完了")
+            print("=" * 70)
+
+        # severity_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(severity_dir, "*.csv", verbose=False)
+        print("✓")
+
+        # Phase 10: CRITICAL抽出 + マージ処理
+        print("\n[Phase 10] CRITICAL抽出 + マージ処理開始")
+        print("-" * 70)
+
+        # severity_extracted/ の全CSVからCRITICAL行を抽出してマージ
+        severity_extracted_files = sorted(severity_extracted_dir.glob("*.csv"))
+
+        if not severity_extracted_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            critical_output = project_root / "critical_merged.csv"
+            print(f"📄 対象ファイル数: {len(severity_extracted_files)}")
+            print(f"フィルタ条件: Severity=CRITICAL")
+            print(f"🔍 CRITICAL抽出 + マージ中...", end=" ")
+
+            result = filter_and_merge_critical(
+                severity_extracted_files, critical_output, verbose=False
+            )
+
+            if result:
+                print(f"✓ ({result.name})")
+            else:
+                print("⚠️  CRITICAL行なし")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 10 完了")
+            print("=" * 70)
+
+        # severity_extracted_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(severity_extracted_dir, "*.csv", verbose=False)
         print("✓")
 
     except Exception as e:

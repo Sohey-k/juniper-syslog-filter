@@ -1289,3 +1289,932 @@ Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,Message
 まで完成です！
 
 実装完了です！
+
+# pandas版 extract_protocol.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/extract_protocol.py`** - pandas版の実装
+2. **`tests/test_extract_protocol.py`** - テストコード（4テストケース）
+
+---
+
+## 🎯 機能
+
+### 役割
+- `classified_logs/*.csv` のMessage列から protocol 情報を抽出
+- パターン: `protocol=xxx` → protocol列に抽出
+- protocol列をMessage列の**直前**に追加
+- `protocol_extracted/*.csv` に出力
+
+### インターフェース
+
+```python
+def extract_protocol(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]:
+    """
+    Message列からprotocol情報を抽出し、新しい列として追加
+    
+    Returns:
+        List[Path]: 出力されたprotocol抽出済みCSVファイルのパスリスト
+    """
+```
+
+---
+
+## 🚀 pandas化のポイント
+
+### 1. 正規表現で protocol を抽出
+
+```python
+# パターン: protocol=xxx
+pattern = r'protocol=(\w+)'
+
+# str.extract() でベクトル演算
+extracted = df['Message'].str.extract(pattern, expand=False)
+
+# protocol列として追加（マッチしない場合は空文字列）
+df['protocol'] = extracted.fillna('')
+```
+
+### 2. 列の順序調整
+
+```python
+# protocol列をMessage列の直前に配置
+cols = df.columns.tolist()
+cols.remove('protocol')
+message_idx = cols.index('Message')
+cols.insert(message_idx, 'protocol')
+df = df[cols]
+```
+
+---
+
+## 🧪 テストケース（4個）
+
+| No  | テスト名                                       | 内容                           |
+| --- | ---------------------------------------------- | ------------------------------ |
+| 1   | `test_extract_protocol_basic`                  | protocol情報が正しく抽出される |
+| 2   | `test_extract_protocol_no_match`               | protocol情報がない行は空文字列 |
+| 3   | `test_extract_protocol_multiple_files`         | 複数ファイル処理               |
+| 4   | `test_extract_protocol_missing_message_column` | Message列なし（エラー）        |
+
+### テスト実行
+
+```powershell
+# extract_protocol.pyのテストのみ
+pytest tests/test_extract_protocol.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+---
+
+## 📝 使用例
+
+### 個別モジュールの実行
+
+```python
+from pathlib import Path
+from modules.extract_protocol import extract_protocol
+
+# classified_logs/*.csvからprotocol抽出
+classified_files = sorted(Path("classified_logs").glob("*.csv"))
+
+protocol_files = extract_protocol(
+    classified_files,
+    "protocol_extracted",
+    verbose=True
+)
+
+print(f"処理完了: {len(protocol_files)}ファイル")
+```
+
+### run.pyでの使用
+
+```python
+# run.py（Phase 7）
+from modules.extract_protocol import extract_protocol
+
+# classified_logs/*.csvを取得
+classified_files = sorted(classified_dir.glob("*.csv"))
+
+# protocol抽出実行
+protocol_files = extract_protocol(
+    classified_files,
+    protocol_dir,
+    verbose=False
+)
+
+print(f"✓ ({len(protocol_files)}ファイル作成)")
+```
+
+---
+
+## 💡 抽出パターンの例
+
+### 入力（Message列）
+```
+RT_IDP_ATTACK_LOG: SQL injection 192.168.1.5/12345 > 203.0.113.10/80 protocol=tcp
+```
+
+### 抽出結果（protocol列）
+```
+tcp
+```
+
+### その他の例
+```
+protocol=tcp  → "tcp"
+protocol=udp  → "udp"
+protocol=icmp → "icmp"
+(なし)        → "" (空文字列)
+```
+
+---
+
+## 📊 列の変化
+
+### 入力（classified_logs/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,Message
+2025-12-16T00:00:00Z,srx-fw01,RT_IDP,192.168.1.5 > 8.8.8.8,192.168.1.5,private,8.8.8.8,global,RT_IDP_ATTACK_LOG: SQL injection protocol=tcp
+```
+
+### 出力（protocol_extracted/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,Message
+2025-12-16T00:00:00Z,srx-fw01,RT_IDP,192.168.1.5 > 8.8.8.8,192.168.1.5,private,8.8.8.8,global,tcp,RT_IDP_ATTACK_LOG: SQL injection protocol=tcp
+```
+
+**追加された列**: protocol（Messageの直前）
+
+---
+
+## ✅ 確認事項
+
+- [x] pandas使用（str.extract）
+- [x] ファイル出力
+- [x] 既存のrun.pyと互換
+- [x] カスタム例外クラス
+- [x] 型ヒント完備
+- [x] テストコード（4ケース）
+- [x] エラーハンドリング
+- [x] 正規表現パターン抽出
+
+---
+
+## 🔄 次のステップ
+
+1. **テスト実行**
+   ```powershell
+   pytest tests/test_extract_protocol.py -v
+   ```
+
+2. **run.pyでPhase 7を有効化**
+   - Phase 7のコメントアウトを解除
+
+3. **次のモジュール開発**
+   - Phase 8: `extract_severity_level.py`（SeverityLevel抽出）
+
+実装完了です！
+
+# pandas版 extract_severity_level.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/extract_severity_level.py`** - pandas版の実装
+2. **`tests/test_extract_severity_level.py`** - テストコード（4テストケース）
+
+---
+
+## 🎯 機能
+
+### 役割
+- `protocol_extracted/*.csv` のMessage列から SeverityLevel 情報を抽出
+- パターン: `SeverityLevel=数字` → SeverityLevel列に抽出
+- SeverityLevel列をMessage列の**直前**に追加
+- `severity_level_extracted/*.csv` に出力
+
+### インターフェース
+
+```python
+def extract_severity_level(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]:
+    """
+    Message列からSeverityLevel情報を抽出し、新しい列として追加
+    
+    Returns:
+        List[Path]: 出力されたSeverityLevel抽出済みCSVファイルのパスリスト
+    """
+```
+
+---
+
+## 🚀 pandas化のポイント
+
+### 1. 正規表現で SeverityLevel を抽出
+
+```python
+# パターン: SeverityLevel=数字
+pattern = r'SeverityLevel=(\d+)'
+
+# str.extract() でベクトル演算
+extracted = df['Message'].str.extract(pattern, expand=False)
+
+# SeverityLevel列として追加（マッチしない場合は空文字列）
+df['SeverityLevel'] = extracted.fillna('')
+```
+
+### 2. 列の順序調整
+
+```python
+# SeverityLevel列をMessage列の直前に配置
+cols = df.columns.tolist()
+cols.remove('SeverityLevel')
+message_idx = cols.index('Message')
+cols.insert(message_idx, 'SeverityLevel')
+df = df[cols]
+```
+
+---
+
+## 🧪 テストケース（4個）
+
+| No  | テスト名                                             | 内容                                |
+| --- | ---------------------------------------------------- | ----------------------------------- |
+| 1   | `test_extract_severity_level_basic`                  | SeverityLevel情報が正しく抽出される |
+| 2   | `test_extract_severity_level_no_match`               | SeverityLevel情報がない行は空文字列 |
+| 3   | `test_extract_severity_level_multiple_files`         | 複数ファイル処理                    |
+| 4   | `test_extract_severity_level_missing_message_column` | Message列なし（エラー）             |
+
+### テスト実行
+
+```powershell
+# extract_severity_level.pyのテストのみ
+pytest tests/test_extract_severity_level.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+---
+
+## 📝 使用例
+
+### 個別モジュールの実行
+
+```python
+from pathlib import Path
+from modules.extract_severity_level import extract_severity_level
+
+# protocol_extracted/*.csvからSeverityLevel抽出
+protocol_files = sorted(Path("protocol_extracted").glob("*.csv"))
+
+severity_files = extract_severity_level(
+    protocol_files,
+    "severity_level_extracted",
+    verbose=True
+)
+
+print(f"処理完了: {len(severity_files)}ファイル")
+```
+
+### run.pyでの使用
+
+```python
+# run.py（Phase 8）
+from modules.extract_severity_level import extract_severity_level
+
+# protocol_extracted/*.csvを取得
+protocol_files = sorted(protocol_dir.glob("*.csv"))
+
+# SeverityLevel抽出実行
+severity_files = extract_severity_level(
+    protocol_files,
+    severity_dir,
+    verbose=False
+)
+
+print(f"✓ ({len(severity_files)}ファイル作成)")
+```
+
+---
+
+## 💡 抽出パターンの例
+
+### 入力（Message列）
+```
+RT_IDP_ATTACK_LOG: SQL injection protocol=tcp SeverityLevel=4 Severity=WARNING
+```
+
+### 抽出結果（SeverityLevel列）
+```
+4
+```
+
+### その他の例
+```
+SeverityLevel=4 → "4"
+SeverityLevel=2 → "2"
+SeverityLevel=1 → "1"
+(なし)          → "" (空文字列)
+```
+
+---
+
+## 📊 列の変化
+
+### 入力（protocol_extracted/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,Message
+2025-12-18T00:08:43Z,srx-fw01,RT_IDP,10.249.70.21 > 169.148.217.171,10.249.70.21,private,169.148.217.171,global,icmp,RT_IDP_ATTACK_LOG: SSH brute force attack detected protocol=icmp SeverityLevel=4 Severity=WARNING
+```
+
+### 出力（severity_level_extracted/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,SeverityLevel,Message
+2025-12-18T00:08:43Z,srx-fw01,RT_IDP,10.249.70.21 > 169.148.217.171,10.249.70.21,private,169.148.217.171,global,icmp,4,RT_IDP_ATTACK_LOG: SSH brute force attack detected protocol=icmp SeverityLevel=4 Severity=WARNING
+```
+
+**追加された列**: SeverityLevel（Messageの直前）
+
+---
+
+## ✅ 確認事項
+
+- [x] pandas使用（str.extract）
+- [x] ファイル出力
+- [x] 既存のrun.pyと互換
+- [x] カスタム例外クラス
+- [x] 型ヒント完備
+- [x] テストコード（4ケース）
+- [x] エラーハンドリング
+- [x] 正規表現パターン抽出（数字のみ）
+
+---
+
+## 🔄 run.py 追加コード
+
+### import追加
+```python
+from modules.extract_severity_level import extract_severity_level
+```
+
+### ディレクトリ変数追加
+```python
+severity_dir = project_root / "severity_level_extracted"
+```
+
+### Phase 8追加（Phase 7のクリーンアップ直後）
+```python
+        # Phase 8: SeverityLevel抽出処理
+        print("\n[Phase 8] SeverityLevel抽出処理開始")
+        print("-" * 70)
+
+        # protocol_extracted/ の全CSVからSeverityLevel列を抽出
+        protocol_files = sorted(protocol_dir.glob("*.csv"))
+
+        if not protocol_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            severity_dir = project_root / "severity_level_extracted"
+            print(f"📄 対象ファイル数: {len(protocol_files)}")
+            print(f"抽出パターン: SeverityLevel=数字")
+            print(f"🔍 SeverityLevel抽出中...", end=" ")
+
+            severity_files = extract_severity_level(
+                protocol_files, severity_dir, verbose=False
+            )
+
+            print(f"✓ ({len(severity_files)}ファイル作成)")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 8 完了")
+            print("=" * 70)
+
+        # protocol_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(protocol_dir, "*.csv", verbose=False)
+        print("✓")
+```
+
+---
+
+## 🔄 次のステップ
+
+1. **テスト実行**
+   ```powershell
+   pytest tests/test_extract_severity_level.py -v
+   ```
+
+2. **run.pyにPhase 8を追加**
+   - import追加
+   - ディレクトリ変数追加
+   - Phase 8のコード追加
+
+3. **run.pyで全体動作確認**
+
+実装完了です！
+
+# pandas版 extract_severity.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/extract_severity.py`** - pandas版の実装
+2. **`tests/test_extract_severity.py`** - テストコード（4テストケース）
+
+---
+
+## 🎯 機能
+
+### 役割
+- `severity_level_extracted/*.csv` のMessage列から Severity 情報を抽出
+- パターン: `Severity=xxx` → Severity列に抽出
+- Severity列をMessage列の**直前**に追加
+- `severity_extracted/*.csv` に出力
+
+### インターフェース
+
+```python
+def extract_severity(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]:
+    """
+    Message列からSeverity情報を抽出し、新しい列として追加
+    
+    Returns:
+        List[Path]: 出力されたSeverity抽出済みCSVファイルのパスリスト
+    """
+```
+
+---
+
+## 🚀 pandas化のポイント
+
+### 1. 正規表現で Severity を抽出
+
+```python
+# パターン: Severity=xxx
+pattern = r'Severity=(\w+)'
+
+# str.extract() でベクトル演算
+extracted = df['Message'].str.extract(pattern, expand=False)
+
+# Severity列として追加（マッチしない場合は空文字列）
+df['Severity'] = extracted.fillna('')
+```
+
+### 2. 列の順序調整
+
+```python
+# Severity列をMessage列の直前に配置
+cols = df.columns.tolist()
+cols.remove('Severity')
+message_idx = cols.index('Message')
+cols.insert(message_idx, 'Severity')
+df = df[cols]
+```
+
+---
+
+## 🧪 テストケース（4個）
+
+| No  | テスト名                                       | 内容                           |
+| --- | ---------------------------------------------- | ------------------------------ |
+| 1   | `test_extract_severity_basic`                  | Severity情報が正しく抽出される |
+| 2   | `test_extract_severity_no_match`               | Severity情報がない行は空文字列 |
+| 3   | `test_extract_severity_multiple_files`         | 複数ファイル処理               |
+| 4   | `test_extract_severity_missing_message_column` | Message列なし（エラー）        |
+
+### テスト実行
+
+```powershell
+# extract_severity.pyのテストのみ
+pytest tests/test_extract_severity.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+---
+
+## 📝 使用例
+
+### 個別モジュールの実行
+
+```python
+from pathlib import Path
+from modules.extract_severity import extract_severity
+
+# severity_level_extracted/*.csvからSeverity抽出
+severity_level_files = sorted(Path("severity_level_extracted").glob("*.csv"))
+
+severity_files = extract_severity(
+    severity_level_files,
+    "severity_extracted",
+    verbose=True
+)
+
+print(f"処理完了: {len(severity_files)}ファイル")
+```
+
+### run.pyでの使用
+
+```python
+# run.py（Phase 9）
+from modules.extract_severity import extract_severity
+
+# severity_level_extracted/*.csvを取得
+severity_level_files = sorted(severity_level_dir.glob("*.csv"))
+
+# Severity抽出実行
+severity_files = extract_severity(
+    severity_level_files,
+    severity_dir,
+    verbose=False
+)
+
+print(f"✓ ({len(severity_files)}ファイル作成)")
+```
+
+---
+
+## 💡 抽出パターンの例
+
+### 入力（Message列）
+```
+RT_IDP_ATTACK_LOG: SSH brute force attack protocol=icmp SeverityLevel=4 Severity=WARNING
+```
+
+### 抽出結果（Severity列）
+```
+WARNING
+```
+
+### その他の例
+```
+Severity=WARNING  → "WARNING"
+Severity=CRITICAL → "CRITICAL"
+Severity=INFO     → "INFO"
+(なし)            → "" (空文字列)
+```
+
+---
+
+## 📊 列の変化
+
+### 入力（severity_level_extracted/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,SeverityLevel,Message
+2025-12-18T00:08:43Z,srx-fw01,RT_IDP,10.249.70.21 > 169.148.217.171,10.249.70.21,private,169.148.217.171,global,icmp,4,RT_IDP_ATTACK_LOG: SSH brute force attack protocol=icmp SeverityLevel=4 Severity=WARNING
+```
+
+### 出力（severity_extracted/*.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,SeverityLevel,Severity,Message
+2025-12-18T00:08:43Z,srx-fw01,RT_IDP,10.249.70.21 > 169.148.217.171,10.249.70.21,private,169.148.217.171,global,icmp,4,WARNING,RT_IDP_ATTACK_LOG: SSH brute force attack protocol=icmp SeverityLevel=4 Severity=WARNING
+```
+
+**追加された列**: Severity（Messageの直前）
+
+---
+
+## ✅ 確認事項
+
+- [x] pandas使用（str.extract）
+- [x] ファイル出力
+- [x] 既存のrun.pyと互換
+- [x] カスタム例外クラス
+- [x] 型ヒント完備
+- [x] テストコード（4ケース）
+- [x] エラーハンドリング
+- [x] 正規表現パターン抽出（文字列）
+
+---
+
+## 🔄 run.py 追加コード
+
+### import追加
+```python
+from modules.extract_severity import extract_severity
+```
+
+### ディレクトリ変数追加
+```python
+severity_extracted_dir = project_root / "severity_extracted"
+```
+
+### Phase 9追加（Phase 8のクリーンアップ直後）
+```python
+        # Phase 9: Severity抽出処理
+        print("\n[Phase 9] Severity抽出処理開始")
+        print("-" * 70)
+
+        # severity_level_extracted/ の全CSVからSeverity列を抽出
+        severity_level_files = sorted(severity_dir.glob("*.csv"))
+
+        if not severity_level_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            severity_extracted_dir = project_root / "severity_extracted"
+            print(f"📄 対象ファイル数: {len(severity_level_files)}")
+            print(f"抽出パターン: Severity=xxx")
+            print(f"🔍 Severity抽出中...", end=" ")
+
+            severity_extracted_files = extract_severity(
+                severity_level_files, severity_extracted_dir, verbose=False
+            )
+
+            print(f"✓ ({len(severity_extracted_files)}ファイル作成)")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 9 完了")
+            print("=" * 70)
+
+        # severity_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(severity_dir, "*.csv", verbose=False)
+        print("✓")
+```
+
+---
+
+## 🔄 次のステップ
+
+1. **テスト実行**
+   ```powershell
+   pytest tests/test_extract_severity.py -v
+   ```
+
+2. **run.pyにPhase 9を追加**
+   - import追加
+   - ディレクトリ変数追加
+   - Phase 9のコード追加
+
+3. **run.pyで全体動作確認**
+
+実装完了です！
+
+# pandas版 filter_critical_and_merge.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/filter_critical_and_merge.py`** - pandas版の実装
+2. **`tests/test_filter_critical_and_merge.py`** - テストコード（4テストケース）
+
+---
+
+## 🎯 機能
+
+### 役割
+- `severity_extracted/*.csv` から `Severity=CRITICAL` の行のみを抽出
+- 全ファイルを1つにマージ
+- `critical_merged.csv` に出力（単一ファイル）
+
+### 処理フロー
+1. 各CSVファイルから Severity=CRITICAL の行をフィルタ
+2. 全てのDataFrameをpd.concat()でマージ
+3. 単一のCSVファイルとして出力
+
+### インターフェース
+
+```python
+def filter_and_merge_critical(
+    input_files: List[Path],
+    output_file: Path,
+    verbose: bool = True
+) -> Path:
+    """
+    Severity=CRITICALの行のみを抽出し、全ファイルをマージ
+    
+    Returns:
+        Path: 出力されたマージ済みCSVファイルのPath
+        None: CRITICAL行が1つもない場合
+    """
+```
+
+---
+
+## 🚀 pandas化のポイント
+
+### 1. DataFrameでフィルタリング
+
+```python
+# Severity=CRITICALの行のみフィルタ
+critical_df = df[df['Severity'] == 'CRITICAL']
+```
+
+### 2. 複数DataFrameのマージ
+
+```python
+# 全DataFrameをマージ
+merged_df = pd.concat(critical_dataframes, ignore_index=True)
+```
+
+### 3. 単一ファイル出力
+
+```python
+# CSVとして出力
+merged_df.to_csv(output_file, index=False, encoding='utf-8', na_rep='')
+```
+
+---
+
+## 🧪 テストケース（4個）
+
+| No  | テスト名                                       | 内容                            |
+| --- | ---------------------------------------------- | ------------------------------- |
+| 1   | `test_filter_critical_basic`                   | CRITICAL行のみが抽出される      |
+| 2   | `test_filter_critical_multiple_files`          | 複数ファイルが1つにマージされる |
+| 3   | `test_filter_critical_no_critical_rows`        | CRITICAL行がない場合はNone      |
+| 4   | `test_filter_critical_missing_severity_column` | Severity列なし（エラー）        |
+
+### テスト実行
+
+```powershell
+# filter_critical_and_merge.pyのテストのみ
+pytest tests/test_filter_critical_and_merge.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+---
+
+## 📝 使用例
+
+### 個別モジュールの実行
+
+```python
+from pathlib import Path
+from modules.filter_critical_and_merge import filter_and_merge_critical
+
+# severity_extracted/*.csvからCRITICAL抽出 + マージ
+severity_files = sorted(Path("severity_extracted").glob("*.csv"))
+
+output = filter_and_merge_critical(
+    severity_files,
+    "critical_merged.csv",
+    verbose=True
+)
+
+if output:
+    print(f"処理完了: {output}")
+else:
+    print("CRITICAL行が見つかりませんでした")
+```
+
+### run.pyでの使用
+
+```python
+# run.py（Phase 10）
+from modules.filter_critical_and_merge import filter_and_merge_critical
+
+# severity_extracted/*.csvを取得
+severity_files = sorted(severity_extracted_dir.glob("*.csv"))
+
+# CRITICAL抽出 + マージ実行
+critical_output = filter_and_merge_critical(
+    severity_files,
+    project_root / "critical_merged.csv",
+    verbose=False
+)
+
+if critical_output:
+    print(f"✓ (CRITICAL: {critical_output.name})")
+else:
+    print("⚠️  CRITICAL行なし")
+```
+
+---
+
+## 💡 処理例
+
+### 入力（severity_extracted/*.csv）
+
+**ファイル1:**
+```csv
+...,Severity,Message
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 1
+...,WARNING,RT_IDP_ATTACK_LOG: Attack 2
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 3
+```
+
+**ファイル2:**
+```csv
+...,Severity,Message
+...,WARNING,RT_IDP_ATTACK_LOG: Attack 4
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 5
+```
+
+### 出力（critical_merged.csv）
+```csv
+...,Severity,Message
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 1
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 3
+...,CRITICAL,RT_IDP_ATTACK_LOG: Attack 5
+```
+
+**結果**: CRITICAL行のみ3行がマージされた単一ファイル
+
+---
+
+## 📊 処理の流れ
+
+```
+severity_extracted/
+├── file1.csv (100行: CRITICAL 10行, WARNING 90行)
+├── file2.csv (100行: CRITICAL 5行, WARNING 95行)
+└── file3.csv (100行: CRITICAL 8行, WARNING 92行)
+                    ↓
+            [CRITICAL抽出]
+                    ↓
+critical_merged.csv (23行: 全てCRITICAL)
+```
+
+---
+
+## ✅ 確認事項
+
+- [x] pandas使用（フィルタリング + マージ）
+- [x] 単一ファイル出力
+- [x] 既存のrun.pyと互換
+- [x] カスタム例外クラス
+- [x] 型ヒント完備
+- [x] テストコード（4ケース）
+- [x] エラーハンドリング
+- [x] CRITICAL行がない場合の対応
+
+---
+
+## 🔄 run.py 追加コード
+
+### import追加
+```python
+from modules.filter_critical_and_merge import filter_and_merge_critical
+```
+
+### Phase 10追加（Phase 9のクリーンアップ直後）
+```python
+        # Phase 10: CRITICAL抽出 + マージ処理
+        print("\n[Phase 10] CRITICAL抽出 + マージ処理開始")
+        print("-" * 70)
+
+        # severity_extracted/ の全CSVからCRITICAL行を抽出してマージ
+        severity_extracted_files = sorted(severity_extracted_dir.glob("*.csv"))
+
+        if not severity_extracted_files:
+            print("\n⚠️  処理するファイルがありません")
+        else:
+            critical_output = project_root / "critical_merged.csv"
+            print(f"📄 対象ファイル数: {len(severity_extracted_files)}")
+            print(f"フィルタ条件: Severity=CRITICAL")
+            print(f"🔍 CRITICAL抽出 + マージ中...", end=" ")
+
+            result = filter_and_merge_critical(
+                severity_extracted_files, critical_output, verbose=False
+            )
+
+            if result:
+                print(f"✓ ({result.name})")
+            else:
+                print("⚠️  CRITICAL行なし")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 10 完了")
+            print("=" * 70)
+
+        # severity_extracted_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(severity_extracted_dir, "*.csv", verbose=False)
+        print("✓")
+```
+
+---
+
+## 🔄 次のステップ
+
+1. **テスト実行**
+   ```powershell
+   pytest tests/test_filter_critical_and_merge.py -v
+   ```
+
+2. **run.pyにPhase 10を追加**
+   - import追加
+   - Phase 10のコード追加
+
+3. **run.pyで全体動作確認**
+   - Phase 1-10まで通しで実行
+   - 最終出力: `critical_merged.csv`
+
+実装完了です！
