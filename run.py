@@ -331,7 +331,8 @@ def main():
         if not severity_extracted_files:
             print("\n⚠️  処理するファイルがありません")
         else:
-            critical_output = project_root / "critical_merged.csv"
+            critical_dir = project_root / "critical_only"
+            critical_output = critical_dir / "critical_merged.csv"
             print(f"📄 対象ファイル数: {len(severity_extracted_files)}")
             print(f"フィルタ条件: Severity=CRITICAL")
             print(f"🔍 CRITICAL抽出 + マージ中...", end=" ")

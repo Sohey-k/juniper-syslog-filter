@@ -2062,9 +2062,10 @@ from modules.filter_critical_and_merge import filter_and_merge_critical
 # severity_extracted/*.csvからCRITICAL抽出 + マージ
 severity_files = sorted(Path("severity_extracted").glob("*.csv"))
 
+# critical_only/ディレクトリに出力
 output = filter_and_merge_critical(
     severity_files,
-    "critical_merged.csv",
+    Path("critical_only") / "critical_merged.csv",
     verbose=True
 )
 
@@ -2083,15 +2084,18 @@ from modules.filter_critical_and_merge import filter_and_merge_critical
 # severity_extracted/*.csvを取得
 severity_files = sorted(severity_extracted_dir.glob("*.csv"))
 
-# CRITICAL抽出 + マージ実行
-critical_output = filter_and_merge_critical(
+# CRITICAL抽出 + マージ実行（critical_only/ディレクトリに出力）
+critical_dir = project_root / "critical_only"
+critical_output = critical_dir / "critical_merged.csv"
+
+result = filter_and_merge_critical(
     severity_files,
-    project_root / "critical_merged.csv",
+    critical_output,
     verbose=False
 )
 
-if critical_output:
-    print(f"✓ (CRITICAL: {critical_output.name})")
+if result:
+    print(f"✓ (CRITICAL: {result.name})")
 else:
     print("⚠️  CRITICAL行なし")
 ```
@@ -2176,7 +2180,8 @@ from modules.filter_critical_and_merge import filter_and_merge_critical
         if not severity_extracted_files:
             print("\n⚠️  処理するファイルがありません")
         else:
-            critical_output = project_root / "critical_merged.csv"
+            critical_dir = project_root / "critical_only"
+            critical_output = critical_dir / "critical_merged.csv"
             print(f"📄 対象ファイル数: {len(severity_extracted_files)}")
             print(f"フィルタ条件: Severity=CRITICAL")
             print(f"🔍 CRITICAL抽出 + マージ中...", end=" ")

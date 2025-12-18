@@ -17,9 +17,9 @@ Windowsで動作するJuniper SRX syslogフィルタリングツール。
 ### 実務で直面した課題
 
 元職場で、定期レポート用の脅威データをフィルタリングする業務がありました。  
-使用されていたツールは **SikuliX** で作成されたスクリプトでしたが、以下の深刻な問題を抱えていました：
+使用されていたツールは **GUI操作を前提とした画像認識・座標指定型の自動化スクリプト** で作成されたものでしたが、以下の深刻な問題を抱えていました：
 
-#### SikuliXスクリプトの問題点
+#### 旧スクリプトの問題点
 
 | 問題                 | 詳細                                                     |
 | -------------------- | -------------------------------------------------------- |
@@ -163,35 +163,92 @@ Phase 4: ショートカット化
 **全モジュールの入出力を統一**:
 
 ```python
-def module_name(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+def module_name(
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    verbose: bool = True
+) -> List[Path]:
     """
-    処理を実行してDataFrameを返す
+    pandas + ファイル出力アプローチ
+    
+    内部でpandasのベクトル演算を使用し高速処理を実現。
+    結果はCSVファイルとして保存され、パスのリストを返す。
     
     Args:
-        df: 入力DataFrame
-        **kwargs: オプションパラメータ
+        input_files: 入力CSVファイルのリスト
+        output_dir: 出力先ディレクトリ
+        verbose: 詳細ログを出力するか
         
     Returns:
-        pd.DataFrame: 処理済みDataFrame
+        List[Path]: 出力されたCSVファイルのPathリスト
+        
+    Examples:
+        >>> output_files = module_name(csv_files, "output_dir", verbose=True)
     """
-    # ベクトル演算による処理
-    df['new_column'] = df['existing_column'].str.extract(pattern)
-    return df
+    output_files = []
+    
+    for input_path in input_files:
+        # pandasでベクトル演算
+        df = pd.read_csv(input_path, encoding='utf-8', keep_default_na=False)
+        df['new_column'] = df['existing_column'].str.extract(pattern)
+        
+        # CSVとして保存
+        output_path = output_dir / input_path.name
+        df.to_csv(output_path, index=False, encoding='utf-8', na_rep='')
+        output_files.append(output_path)
+    
+    return output_files
+```
+
+#### 主なベクトル演算パターン
+
+```python
+# 文字列抽出
+df['protocol'] = df['Message'].str.extract(r'protocol=(\w+)')
+
+# 文字列分割
+df[['srcIP', 'dstIP']] = df['routing'].str.split(' > ', expand=True, n=1)
+
+# フィルタリング
+critical_df = df[df['Severity'] == 'CRITICAL']
+
+# 条件判定
+df['srcIP_type'] = df['srcIP'].apply(classify_ip_address)
+
+# 列選択
+reduced_df = df.iloc[:, [0, 1, 2, 6]]
+
+# マージ
+merged_df = pd.concat(df_list, ignore_index=True)
 ```
 
 #### run.pyはオーケストレーター
 
 ```python
 # イメージ（簡略版）
-df = extract_and_filter(zip_path)        # Phase 1
-df = merge_dataframes(df_list)           # Phase 2
-df = reduce_columns(df, keep=[0,1,2,6]) # Phase 3
-df = extract_routing(df)                 # Phase 4
-df = split_ip(df)                        # Phase 5
-df = classify_ip(df)                     # Phase 6
-df = extract_protocol(df)                # Phase 7
-# ... 以降同様
-export_to_excel(df, output_path)         # 最終出力
+# 各モジュールは List[Path] → List[Path] + ファイル出力
+
+# Phase 1: ZIP展開 + フィルタリング（ループ処理）
+while zip_files:
+    extracted_files = extract_zip(zip_file, temp_dir)
+    filtered_files = filter_keyword(extracted_files, filtered_dir)
+    cleanup_processed_files(zip_file, extracted_files)
+
+# Phase 2: マージ
+merged_files = merge_csv_files(filtered_files, merged_dir, max_rows=800000)
+
+# Phase 3-10: 各種変換処理
+reduced_files = reduce_columns(merged_files, reduced_dir, keep=[0,1,2,6])
+routed_files = extract_routing(reduced_files, routed_dir)
+splitted_files = split_ip(routed_files, splitted_dir)
+classified_files = classify_ip(splitted_files, classified_dir)
+protocol_files = extract_protocol(classified_files, protocol_dir)
+severity_level_files = extract_severity_level(protocol_files, severity_level_dir)
+severity_files = extract_severity(severity_level_files, severity_dir)
+critical_file = filter_and_merge_critical(severity_files, "critical_merged.csv")
+
+# 最終出力
+export_to_excel(critical_file, output_path)
 ```
 
 ---
@@ -842,5 +899,7 @@ MIT License
 | 2025-12-16 | 1.1.0      | 詳細な処理フロー反映・14モジュール構成に更新                               |
 | 2025-12-16 | 1.2.0      | 開発環境セットアップ追加（uv + venv + VSCode + PowerShell）                |
 | 2025-12-19 | 2.0.0      | pandas方針追加・scripts/ディレクトリ追加・サンプルデータ生成スクリプト統合 |
+
+| 2025-12-18 | 2.1.0      | pandas実装完了・インターフェース設計を実際の実装に更新（List[Path]方式） |
 
 ---
