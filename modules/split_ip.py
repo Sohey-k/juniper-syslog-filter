@@ -25,7 +25,10 @@ class SplitIPError(Exception):
 
 
 def split_ip(
-    input_files: List[Path], output_dir: Union[str, Path], verbose: bool = True
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    delimiter: str = " > ",
+    verbose: bool = True,
 ) -> List[Path]:
     """
     routing列を srcIP と dstIP に分割
@@ -39,6 +42,7 @@ def split_ip(
     Args:
         input_files: 入力CSVファイルのリスト
         output_dir: 出力先ディレクトリ
+        delimiter: routing列の区切り文字
         verbose: 詳細ログを出力するか
 
     Returns:
@@ -69,9 +73,9 @@ def split_ip(
             if "routing" not in df.columns:
                 raise SplitIPError(f"routing列が見つかりません: {input_path.name}")
 
-            # routing列を " > " で分割（ベクトル演算）
+            # routing列を delimiter で分割（ベクトル演算）
             # expand=True で別々の列に分割
-            split_result = df["routing"].str.split(" > ", expand=True, n=1)
+            split_result = df["routing"].str.split(delimiter, expand=True, n=1)
 
             # 分割結果を srcIP, dstIP 列として追加
             # 分割できない場合（routing列が空）は空文字列

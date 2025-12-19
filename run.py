@@ -24,6 +24,8 @@ from modules.extract_protocol import extract_protocol
 from modules.extract_severity_level import extract_severity_level
 from modules.extract_severity import extract_severity
 from modules.filter_critical_and_merge import filter_and_merge_critical
+from modules.export_excel import export_to_excel
+from modules.cleanup_all import cleanup_all_directories
 
 
 def main():
@@ -46,6 +48,7 @@ def main():
     protocol_dir = project_root / "protocol_extracted"
     severity_dir = project_root / "severity_level_extracted"
     severity_extracted_dir = project_root / "severity_extracted"
+    final_output_dir = project_root / "final_output"
 
     try:
         # Phase 1: ループ処理（ZIPファイルが無くなるまで）
@@ -354,6 +357,42 @@ def main():
         print(f"  └─ クリーンアップ中...", end=" ")
         cleanup_directory(severity_extracted_dir, "*.csv", verbose=False)
         print("✓")
+
+        # Phase 11: Excel最終出力処理
+        print("\n[Phase 11] Excel最終出力処理開始")
+        print("-" * 70)
+
+        # critical_only/critical_merged.csv をExcel化
+        critical_file = critical_dir / "critical_merged.csv"
+
+        if not critical_file.exists():
+            print("\n⚠️  critical_merged.csvが存在しません")
+        else:
+            print(f"📄 入力ファイル: {critical_file.name}")
+            print(f"📊 Excel出力中...", end=" ")
+
+            excel_output = export_to_excel(
+                critical_file, final_output_dir, verbose=False
+            )
+
+            print(f"✓ ({excel_output.name})")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 11 完了")
+            print("=" * 70)
+
+            # Phase 12: 全ディレクトリクリーンアップ
+        print("\n[Phase 12] 全ディレクトリクリーンアップ開始")
+        print("-" * 70)
+        print("🗑️  中間ディレクトリを削除中...", end=" ")
+
+        deleted_count = cleanup_all_directories(project_root, verbose=False)
+
+        print(f"✓ ({deleted_count}ディレクトリ)")
+
+        print("\n" + "=" * 70)
+        print("✅ Phase 12 完了")
+        print("=" * 70)
 
     except Exception as e:
         print("\n" + "=" * 70)

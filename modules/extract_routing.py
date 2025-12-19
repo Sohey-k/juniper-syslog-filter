@@ -22,7 +22,10 @@ class ExtractRoutingError(Exception):
 
 
 def extract_routing(
-    input_files: List[Path], output_dir: Union[str, Path], verbose: bool = True
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    pattern: str = r"(\d+\.\d+\.\d+\.\d+)/\d+\s*>\s*(\d+\.\d+\.\d+\.\d+)/\d+",
+    verbose: bool = True,
 ) -> List[Path]:
     """
     Message列からrouting情報を抽出し、新しい列として追加
@@ -36,6 +39,7 @@ def extract_routing(
     Args:
         input_files: 入力CSVファイルのリスト
         output_dir: 出力先ディレクトリ
+        pattern: routing抽出用の正規表現パターン
         verbose: 詳細ログを出力するか
 
     Returns:
@@ -56,10 +60,6 @@ def extract_routing(
         return []
 
     output_files = []
-
-    # 正規表現パターン: srcIP/port > dstIP/port
-    # IPアドレス部分のみを抽出（ポート番号を除く）
-    pattern = r"(\d+\.\d+\.\d+\.\d+)/\d+\s*>\s*(\d+\.\d+\.\d+\.\d+)/\d+"
 
     try:
         for input_path in input_files:

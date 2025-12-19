@@ -28,12 +28,15 @@ class FilterCriticalError(Exception):
 
 
 def filter_and_merge_critical(
-    input_files: List[Path], output_file: Union[str, Path], verbose: bool = True
+    input_files: List[Path],
+    output_file: Union[str, Path],
+    severity_filter: str = "CRITICAL",
+    verbose: bool = True,
 ) -> Path:
     """
-    Severity=CRITICALの行のみを抽出し、全ファイルをマージ
+    指定されたSeverityの行のみを抽出し、全ファイルをマージ
 
-    複数のCSVファイルからSeverity列が'CRITICAL'の行のみを抽出し、
+    複数のCSVファイルからSeverity列が指定された値の行のみを抽出し、
     全てのデータを1つのCSVファイルにマージする。
 
     内部的にpandasで処理し、高速化を実現。
@@ -41,6 +44,7 @@ def filter_and_merge_critical(
     Args:
         input_files: 入力CSVファイルのリスト
         output_file: 出力CSVファイルのパス
+        severity_filter: フィルタするSeverity値（デフォルト: "CRITICAL"）
         verbose: 詳細ログを出力するか
 
     Returns:
@@ -51,6 +55,7 @@ def filter_and_merge_critical(
 
     Examples:
         >>> output = filter_and_merge_critical(csv_files, "critical_merged.csv")
+        >>> output = filter_and_merge_critical(csv_files, "warning.csv", severity_filter="WARNING")
     """
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -77,8 +82,8 @@ def filter_and_merge_critical(
 
             total_rows += len(df)
 
-            # Severity=CRITICALの行のみフィルタ
-            critical_df = df[df["Severity"] == "CRITICAL"]
+            # 指定されたSeverityの行のみフィルタ
+            critical_df = df[df["Severity"] == severity_filter]
 
             if len(critical_df) > 0:
                 critical_dataframes.append(critical_df)
@@ -86,13 +91,13 @@ def filter_and_merge_critical(
 
                 if verbose:
                     print(
-                        f"  ✓ {input_path.name}: {len(critical_df)}行のCRITICALを抽出"
+                        f"  ✓ {input_path.name}: {len(critical_df)}行の{severity_filter}を抽出"
                     )
 
-        # CRITICAL行が1つもない場合
+        # 対象行が1つもない場合
         if not critical_dataframes:
             if verbose:
-                print("\n⚠️  CRITICAL行が見つかりませんでした")
+                print(f"\n⚠️  {severity_filter}行が見つかりませんでした")
             return None
 
         # 全DataFrameをマージ
@@ -102,7 +107,7 @@ def filter_and_merge_critical(
         merged_df.to_csv(output_file, index=False, encoding="utf-8", na_rep="")
 
         if verbose:
-            print(f"\n✅ CRITICAL抽出 + マージ完了:")
+            print(f"\n✅ {severity_filter}抽出 + マージ完了:")
             print(f"   入力: {len(input_files)}ファイル ({total_rows}行)")
             print(f"   出力: {output_file.name} ({critical_rows}行)")
 

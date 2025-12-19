@@ -26,7 +26,10 @@ class ExtractSeverityError(Exception):
 
 
 def extract_severity(
-    input_files: List[Path], output_dir: Union[str, Path], verbose: bool = True
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    pattern: str = r"Severity=(\w+)",
+    verbose: bool = True,
 ) -> List[Path]:
     """
     Message列からSeverity情報を抽出し、新しい列として追加
@@ -40,6 +43,7 @@ def extract_severity(
     Args:
         input_files: 入力CSVファイルのリスト
         output_dir: 出力先ディレクトリ
+        pattern: Severity抽出用の正規表現パターン
         verbose: 詳細ログを出力するか
 
     Returns:
@@ -60,9 +64,6 @@ def extract_severity(
         return []
 
     output_files = []
-
-    # 正規表現パターン: Severity=xxx
-    pattern = r"Severity=(\w+)"
 
     try:
         for input_path in input_files:

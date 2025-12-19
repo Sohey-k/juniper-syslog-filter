@@ -2223,3 +2223,641 @@ from modules.filter_critical_and_merge import filter_and_merge_critical
    - 最終出力: `critical_merged.csv`
 
 実装完了です！
+
+# pandas版 export_excel.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/export_excel.py`** - pandas + openpyxl実装
+2. **`tests/test_export_excel.py`** - テストコード（4テストケース）
+
+---
+
+## 🎯 機能
+
+### 役割
+- `critical_only/critical_merged.csv` をExcel形式で出力
+- フォント: 游ゴシック 11pt
+- ヘッダー: 太字
+- 列幅: 自動調整
+- `final_output/*.xlsx` に出力
+
+### インターフェース
+
+```python
+def export_to_excel(
+    input_file: Union[str, Path],
+    output_dir: Union[str, Path],
+    verbose: bool = True
+) -> Path:
+    """
+    CSVファイルをExcel形式で出力
+    
+    Returns:
+        Path: 出力されたExcelファイルのPath
+    """
+```
+
+---
+
+## 🚀 pandas + openpyxl のポイント
+
+### 1. pandasでExcel出力
+
+```python
+# CSVを読み込み
+df = pd.read_csv(input_path, encoding='utf-8', keep_default_na=False)
+
+# Excelに出力
+df.to_excel(output_path, index=False, engine='openpyxl')
+```
+
+### 2. openpyxlでフォーマット設定
+
+```python
+from openpyxl import load_workbook
+from openpyxl.styles import Font
+
+# Excelファイルを開く
+wb = load_workbook(output_path)
+ws = wb.active
+
+# フォント設定（游ゴシック 11pt）
+font = Font(name='游ゴシック', size=11)
+for row in ws.iter_rows():
+    for cell in row:
+        cell.font = font
+
+# ヘッダーを太字に
+header_font = Font(name='游ゴシック', size=11, bold=True)
+for cell in ws[1]:
+    cell.font = header_font
+
+# 列幅自動調整
+for column in ws.columns:
+    max_length = max(len(str(cell.value)) for cell in column)
+    adjusted_width = min(max(max_length + 2, 10), 50)
+    ws.column_dimensions[column[0].column_letter].width = adjusted_width
+
+# 保存
+wb.save(output_path)
+```
+
+---
+
+## 🧪 テストケース（4個）
+
+| No  | テスト名                           | 内容                               |
+| --- | ---------------------------------- | ---------------------------------- |
+| 1   | `test_export_excel_basic`          | 基本的なExcel出力が動作する        |
+| 2   | `test_export_excel_formatting`     | フォント・スタイル設定が適用される |
+| 3   | `test_export_excel_column_width`   | 列幅が自動調整される               |
+| 4   | `test_export_excel_file_not_found` | 存在しないファイル（エラー）       |
+
+### テスト実行
+
+```powershell
+# export_excel.pyのテストのみ
+pytest tests/test_export_excel.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+---
+
+## 📝 使用例
+
+### 個別モジュールの実行
+
+```python
+from pathlib import Path
+from modules.export_excel import export_to_excel
+
+# critical_merged.csvをExcel化
+output = export_to_excel(
+    Path("critical_only/critical_merged.csv"),
+    Path("final_output"),
+    verbose=True
+)
+
+print(f"処理完了: {output}")
+```
+
+### run.pyでの使用
+
+```python
+# run.py（Phase 11）
+from modules.export_excel import export_to_excel
+
+# critical_merged.csvを取得
+critical_file = critical_dir / "critical_merged.csv"
+
+# Excel出力実行
+if critical_file.exists():
+    final_output_dir = project_root / "final_output"
+    excel_output = export_to_excel(
+        critical_file,
+        final_output_dir,
+        verbose=False
+    )
+    print(f"✓ ({excel_output.name})")
+else:
+    print("⚠️  critical_merged.csvが存在しません")
+```
+
+---
+
+## 💡 処理例
+
+### 入力（critical_merged.csv）
+```csv
+Timestamp,Hostname,AppName,routing,srcIP,srcIP_type,dstIP,dstIP_type,protocol,SeverityLevel,Severity,Message
+2025-12-19T10:00:00Z,srx-fw01,RT_IDP,192.168.1.5 > 203.0.113.10,192.168.1.5,private,203.0.113.10,global,tcp,2,CRITICAL,RT_IDP_ATTACK_LOG: SQL injection attack
+```
+
+### 出力（critical_merged.xlsx）
+- ✅ フォント: 游ゴシック 11pt
+- ✅ ヘッダー: 太字
+- ✅ 列幅: 自動調整
+- ✅ 全データ保持
+
+---
+
+## 📊 Excel出力の特徴
+
+### フォーマット設定
+```
+ヘッダー行:
+  - フォント: 游ゴシック 11pt 太字
+  - 列幅: 自動調整（最小10、最大50）
+
+データ行:
+  - フォント: 游ゴシック 11pt
+  - 列幅: 自動調整
+```
+
+### 列幅の計算
+```python
+# 日本語を考慮した列幅計算
+cell_length = len(str(cell.value))
+if any(ord(char) > 127 for char in str(cell.value)):
+    cell_length = int(cell_length * 1.5)  # 日本語は1.5倍
+
+# 最小10、最大50に制限
+adjusted_width = min(max(cell_length + 2, 10), 50)
+```
+
+---
+
+## ✅ 確認事項
+
+- [x] pandas使用（CSV読み込み）
+- [x] openpyxl使用（フォーマット設定）
+- [x] Excel出力（.xlsx形式）
+- [x] フォント設定（游ゴシック 11pt）
+- [x] ヘッダー太字
+- [x] 列幅自動調整
+- [x] 既存のrun.pyと互換
+- [x] カスタム例外クラス
+- [x] 型ヒント完備
+- [x] テストコード（4ケース）
+- [x] エラーハンドリング
+
+---
+
+## 🔄 run.py 追加コード
+
+### ⚡ import追加
+
+```python
+from modules.export_excel import export_to_excel
+```
+
+**追加位置**: run.pyの先頭、他のimportと一緒に追加
+
+---
+
+### ⚡ ディレクトリ変数追加
+
+```python
+final_output_dir = project_root / "final_output"
+```
+
+**追加位置**: run.pyの `main()` 関数内、他のディレクトリ変数と一緒に追加
+
+例：
+```python
+def main():
+    """
+    メイン処理
+    """
+    print("=" * 70)
+    print("Juniper Syslog Filter - Starting...")
+    print("=" * 70)
+
+    # ディレクトリパス設定
+    source_dir = project_root / "source_logs"
+    temp_dir = project_root / "temp_extracted"
+    filtered_dir = project_root / "filtered_logs"
+    merged_dir = project_root / "merged_logs"
+    reduced_dir = project_root / "reduced_logs"
+    routed_dir = project_root / "routed_logs"
+    splitted_dir = project_root / "splitted_logs"
+    classified_dir = project_root / "classified_logs"
+    protocol_dir = project_root / "protocol_extracted"
+    severity_dir = project_root / "severity_level_extracted"
+    severity_extracted_dir = project_root / "severity_extracted"
+    final_output_dir = project_root / "final_output"  # ← ここに追加
+```
+
+---
+
+### ⚡ Phase 11追加（Phase 10のクリーンアップ直後）
+
+```python
+        # Phase 11: Excel最終出力処理
+        print("\n[Phase 11] Excel最終出力処理開始")
+        print("-" * 70)
+
+        # critical_only/critical_merged.csv をExcel化
+        critical_file = critical_dir / "critical_merged.csv"
+
+        if not critical_file.exists():
+            print("\n⚠️  critical_merged.csvが存在しません")
+        else:
+            print(f"📄 入力ファイル: {critical_file.name}")
+            print(f"📊 Excel出力中...", end=" ")
+
+            excel_output = export_to_excel(
+                critical_file, final_output_dir, verbose=False
+            )
+
+            print(f"✓ ({excel_output.name})")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 11 完了")
+            print("=" * 70)
+```
+
+**追加位置**: Phase 10のクリーンアップ処理の直後
+
+完全なコード例：
+```python
+        # Phase 10のクリーンアップ
+        # severity_extracted_dir/ 内の全CSVを削除
+        print(f"  └─ クリーンアップ中...", end=" ")
+        cleanup_directory(severity_extracted_dir, "*.csv", verbose=False)
+        print("✓")
+
+        # ← ここにPhase 11を追加
+        # Phase 11: Excel最終出力処理
+        print("\n[Phase 11] Excel最終出力処理開始")
+        print("-" * 70)
+
+        # critical_only/critical_merged.csv をExcel化
+        critical_file = critical_dir / "critical_merged.csv"
+
+        if not critical_file.exists():
+            print("\n⚠️  critical_merged.csvが存在しません")
+        else:
+            print(f"📄 入力ファイル: {critical_file.name}")
+            print(f"📊 Excel出力中...", end=" ")
+
+            excel_output = export_to_excel(
+                critical_file, final_output_dir, verbose=False
+            )
+
+            print(f"✓ ({excel_output.name})")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 11 完了")
+            print("=" * 70)
+
+    except Exception as e:
+        print("\n" + "=" * 70)
+        print(f"❌ エラーが発生しました: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        print("=" * 70)
+        return 1
+
+    return 0
+```
+
+---
+
+## 🔄 次のステップ
+
+### 1. ファイル配置
+
+```powershell
+# modules/export_excel.py を配置
+# tests/test_export_excel.py を配置
+```
+
+### 2. run.pyの修正
+
+上記の3箇所を追加：
+1. ✅ import追加
+2. ✅ ディレクトリ変数追加
+3. ✅ Phase 11追加
+
+### 3. テスト実行
+
+```powershell
+# export_excel.pyのテストのみ
+pytest tests/test_export_excel.py -v
+
+# 全テスト実行
+pytest tests/ -v
+```
+
+### 4. run.pyで全体動作確認
+
+```powershell
+python run.py
+```
+
+**期待される出力**:
+```
+[Phase 11] Excel最終出力処理開始
+----------------------------------------------------------------------
+📄 入力ファイル: critical_merged.csv
+📊 Excel出力中... ✓ (critical_merged.xlsx)
+
+======================================================================
+✅ Phase 11 完了
+======================================================================
+```
+
+**最終成果物**:
+```
+final_output/
+└── critical_merged.xlsx  # 游ゴシック 11pt、ヘッダー太字、列幅自動調整
+```
+
+---
+
+## 🎉 Phase 11実装完了！
+
+これで **Phase 1-11** の全ETLパイプラインが完成しました！
+
+### パイプライン全体の流れ
+
+```
+source_logs/*.zip
+  ↓ Phase 1: ZIP展開 + キーワードフィルタ（ループ）
+filtered_logs/*.csv
+  ↓ Phase 2: マージ（80万行単位）
+merged_logs/*.csv
+  ↓ Phase 3: 列削減
+reduced_logs/*.csv
+  ↓ Phase 4: routing抽出
+routed_logs/*.csv
+  ↓ Phase 5: IP分割
+splitted_logs/*.csv
+  ↓ Phase 6: IP分類
+classified_logs/*.csv
+  ↓ Phase 7: protocol抽出
+protocol_extracted/*.csv
+  ↓ Phase 8: SeverityLevel抽出
+severity_level_extracted/*.csv
+  ↓ Phase 9: Severity抽出
+severity_extracted/*.csv
+  ↓ Phase 10: CRITICAL抽出 + マージ
+critical_only/critical_merged.csv
+  ↓ Phase 11: Excel最終出力 ✨NEW✨
+final_output/critical_merged.xlsx ✅
+```
+
+実装完了です！
+
+# cleanup_all.py - 実装完了
+
+## 📦 成果物
+
+1. **`modules/cleanup_all.py`** - 全ディレクトリクリーンアップモジュール
+
+---
+
+## 🎯 機能
+
+### 役割
+- パイプライン実行後の中間ディレクトリを全削除
+- `source_logs/` と `final_output/` は保持
+- ストレージの圧迫を防止
+
+### 削除対象（11ディレクトリ）
+```
+temp_extracted/
+filtered_logs/
+merged_logs/
+reduced_logs/
+routed_logs/
+splitted_logs/
+classified_logs/
+protocol_extracted/
+severity_level_extracted/
+severity_extracted/
+critical_only/
+```
+
+---
+
+## 🔄 run.py への追加コード
+
+### ⚡ import追加（先頭）
+
+```python
+from modules.cleanup_all import cleanup_all_directories
+```
+
+**追加位置**: run.pyの先頭、他のimportと一緒に追加
+
+---
+
+### ⚡ Phase 12追加（Phase 11の後、exceptの前）
+
+```python
+        # Phase 12: 全ディレクトリクリーンアップ
+        print("\n[Phase 12] 全ディレクトリクリーンアップ開始")
+        print("-" * 70)
+        print("🗑️  中間ディレクトリを削除中...", end=" ")
+
+        deleted_count = cleanup_all_directories(project_root, verbose=False)
+
+        print(f"✓ ({deleted_count}ディレクトリ)")
+
+        print("\n" + "=" * 70)
+        print("✅ Phase 12 完了")
+        print("=" * 70)
+
+    except Exception as e:
+        print("\n" + "=" * 70)
+        print(f"❌ エラーが発生しました: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        print("=" * 70)
+        return 1
+
+    return 0
+```
+
+**追加位置**: Phase 11の最後（Excel出力完了後）から `except Exception as e:` の間
+
+---
+
+### 完全なコード例
+
+```python
+        # Phase 11: Excel最終出力処理
+        print("\n[Phase 11] Excel最終出力処理開始")
+        print("-" * 70)
+
+        critical_file = critical_dir / "critical_merged.csv"
+
+        if not critical_file.exists():
+            print("\n⚠️  critical_merged.csvが存在しません")
+        else:
+            print(f"📄 入力ファイル: {critical_file.name}")
+            print(f"📊 Excel出力中...", end=" ")
+
+            excel_output = export_to_excel(
+                critical_file, final_output_dir, verbose=False
+            )
+
+            print(f"✓ ({excel_output.name})")
+
+            print("\n" + "=" * 70)
+            print("✅ Phase 11 完了")
+            print("=" * 70)
+
+        # ← ここにPhase 12を追加
+        # Phase 12: 全ディレクトリクリーンアップ
+        print("\n[Phase 12] 全ディレクトリクリーンアップ開始")
+        print("-" * 70)
+        print("🗑️  中間ディレクトリを削除中...", end=" ")
+
+        deleted_count = cleanup_all_directories(project_root, verbose=False)
+
+        print(f"✓ ({deleted_count}ディレクトリ)")
+
+        print("\n" + "=" * 70)
+        print("✅ Phase 12 完了")
+        print("=" * 70)
+
+    except Exception as e:
+        print("\n" + "=" * 70)
+        print(f"❌ エラーが発生しました: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        print("=" * 70)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    exit(main())
+```
+
+---
+
+## 💡 使い方
+
+### オプション1: run.pyから自動実行（推奨）
+
+上記のコードをrun.pyに追加すれば、パイプライン実行後に自動でクリーンアップされます。
+
+```powershell
+python run.py
+```
+
+**実行後の状態**:
+```
+juniper-syslog-filter/
+├── source_logs/          ← 残る
+├── final_output/         ← 残る
+└── (中間ディレクトリ)     ← 全削除！
+```
+
+---
+
+### オプション2: 手動実行
+
+個別にクリーンアップしたい場合：
+
+```powershell
+python modules/cleanup_all.py
+```
+
+**確認プロンプトが表示されます**:
+```
+⚠️  以下のディレクトリを削除します:
+   - temp_extracted/
+   - filtered_logs/
+   ...
+
+実行しますか？ (yes/no): 
+```
+
+---
+
+## 📊 処理の流れ
+
+```
+Phase 1-11: ETLパイプライン実行
+  ↓
+source_logs/ → (11個の中間ディレクトリ) → final_output/
+  ↓
+Phase 12: クリーンアップ
+  ↓
+source_logs/ → final_output/ のみ残る ✅
+```
+
+---
+
+## ✅ 確認事項
+
+- [x] 11個の中間ディレクトリを削除
+- [x] source_logs/ は保持
+- [x] final_output/ は保持
+- [x] run.pyから自動実行可能
+- [x] 手動実行も可能（確認プロンプト付き）
+- [x] verbose制御可能
+- [x] エラーハンドリング実装
+
+---
+
+## 🔄 次のステップ
+
+1. **cleanup_all.py を配置**
+   ```
+   modules/cleanup_all.py
+   ```
+
+2. **run.pyを修正**
+   - import追加
+   - Phase 12追加
+
+3. **run.pyで全体動作確認**
+   ```powershell
+   python run.py
+   ```
+
+4. **期待される出力**
+   ```
+   [Phase 12] 全ディレクトリクリーンアップ開始
+   ----------------------------------------------------------------------
+   🗑️  中間ディレクトリを削除中... ✓ (11ディレクトリ)
+
+   ======================================================================
+   ✅ Phase 12 完了
+   ======================================================================
+   ```
+
+実装完了です！

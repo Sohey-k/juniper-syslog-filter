@@ -367,24 +367,23 @@ juniper-syslog-filter/
 
 ### モジュール構成
 
-| No  | モジュール                  | 責務                         | 入力                           | 出力                           |
-| --- | --------------------------- | ---------------------------- | ------------------------------ | ------------------------------ |
-| 1   | `extract.py`                | ZIP展開                      | source_logs/*.zip              | temp_extracted/*.csv           |
-| 2   | `filter_keyword.py`         | キーワードフィルタ           | temp_extracted/*.csv           | filtered_logs/*.csv            |
-| 3   | `cleanup_temp.py`           | 一時ファイル削除             | source_logs, temp_extracted    | -                              |
-| 4   | `merge_files.py`            | 80万行単位でマージ           | filtered_logs/*.csv            | merged_logs/*.csv              |
-| 5   | `reduce_columns.py`         | 不要列削除                   | merged_logs/*.csv              | columns_reduced/*.csv          |
-| 6   | `extract_routing.py`        | routing列追加                | columns_reduced/*.csv          | routing_added/*.csv            |
-| 7   | `split_ip.py`               | srcIP/dstIP分離              | routing_added/*.csv            | ip_split/*.csv                 |
-| 8   | `classify_ip.py`            | IP判定（private/global）     | ip_split/*.csv                 | ip_classified/*.csv            |
-| 9   | `extract_protocol.py`       | protocol列追加               | ip_classified/*.csv            | protocol_extracted/*.csv       |
-| 10  | `extract_severity_level.py` | SeverityLevel列追加          | protocol_extracted/*.csv       | severity_level_extracted/*.csv |
-| 11  | `extract_severity.py`       | Severity列追加               | severity_level_extracted/*.csv | severity_extracted/*.csv       |
-| 12  | `filter_critical.py`        | CRITICAL行のみ抽出           | severity_extracted/*.csv       | critical_only/*.csv            |
-| 13  | `final_merge.py`            | 最終マージ                   | critical_only/*.csv            | critical_only/merged.csv       |
-| 14  | `export_excel.py`           | Excel出力                    | critical_only/*.csv            | final_output/*.xlsx            |
-| -   | `cleanup_all.py`            | 全ディレクトリクリーンアップ | 各ディレクトリ                 | -                              |
-| -   | `run.py`                    | パイプライン統合実行         | -                              | 処理結果                       |
+| No  | モジュール                     | 責務                         | 入力                           | 出力                           |
+| --- | ------------------------------ | ---------------------------- | ------------------------------ | ------------------------------ |
+| 1   | `extract.py`                   | ZIP展開                      | source_logs/*.zip              | temp_extracted/*.csv           |
+| 2   | `filter_keyword.py`            | キーワードフィルタ           | temp_extracted/*.csv           | filtered_logs/*.csv            |
+| 3   | `cleanup_temp.py`              | 一時ファイル削除             | source_logs, temp_extracted    | -                              |
+| 4   | `merge_files.py`               | 80万行単位でマージ           | filtered_logs/*.csv            | merged_logs/*.csv              |
+| 5   | `reduce_columns.py`            | 不要列削除                   | merged_logs/*.csv              | columns_reduced/*.csv          |
+| 6   | `extract_routing.py`           | routing列追加                | columns_reduced/*.csv          | routing_added/*.csv            |
+| 7   | `split_ip.py`                  | srcIP/dstIP分離              | routing_added/*.csv            | ip_split/*.csv                 |
+| 8   | `classify_ip.py`               | IP判定（private/global）     | ip_split/*.csv                 | ip_classified/*.csv            |
+| 9   | `extract_protocol.py`          | protocol列追加               | ip_classified/*.csv            | protocol_extracted/*.csv       |
+| 10  | `extract_severity_level.py`    | SeverityLevel列追加          | protocol_extracted/*.csv       | severity_level_extracted/*.csv |
+| 11  | `extract_severity.py`          | Severity列追加               | severity_level_extracted/*.csv | severity_extracted/*.csv       |
+| 12  | `filter_critical_and_merge.py` | CRITICAL行抽出 + マージ      | severity_extracted/*.csv       | critical_only/merged.csv       |
+| 13  | `export_excel.py`              | Excel出力                    | critical_only/merged.csv       | final_output/*.xlsx            |
+| -   | `cleanup_all.py`               | 全ディレクトリクリーンアップ | 各ディレクトリ                 | -                              |
+| -   | `run.py`                       | パイプライン統合実行         | -                              | 処理結果                       |
 
 ---
 
@@ -552,16 +551,32 @@ code .
 {
     "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
     "python.terminal.activateEnvironment": true,
-    "python.testing.pytestEnabled": true,
-    "python.testing.unittestEnabled": false,
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": false,
-    "python.linting.flake8Enabled": true,
-    "python.formatting.provider": "black",
-    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
     "files.encoding": "utf8"
 }
 ```
+
+**Flake8設定**（`.flake8`）:
+
+```ini
+[flake8]
+max-line-length = 88
+extend-ignore = E203, W503
+```
+
+**Git改行コード設定**（`.gitattributes`）:
+
+```
+* text=auto eol=lf
+```
+
+これらの設定により：
+- **settings.json**: VSCodeでのPython開発環境を最適化（インタープリタパス、フォーマッター設定）
+- **.flake8**: コードスタイルチェックのルールを定義（Black互換の行長88文字）
+- **.gitattributes**: Windows環境でのCRLF問題を防止（LF統一）
 
 ### 7. 開発の流れ
 
@@ -773,6 +788,12 @@ juniper-syslog-filter/
 ├── run.py                             # エントリーポイント（CLI）
 ├── gui.py                             # GUI起動スクリプト（Phase 3）
 │
+├── # 開発環境設定
+├── .flake8                            # Flake8コードチェッカー設定
+├── .gitattributes                     # Git改行コード設定（CRLF対策）
+├── .vscode/
+│   └── settings.json                  # VSCode設定（フォーマッター等）
+│
 ├── scripts/                           # 開発ツール・補助スクリプト
 │   └── generate_sample_data.py       # サンプルsyslog生成スクリプト
 │
@@ -793,10 +814,9 @@ juniper-syslog-filter/
 │   ├── extract_protocol.py           # protocol抽出
 │   ├── extract_severity_level.py     # SeverityLevel抽出
 │   ├── extract_severity.py           # Severity抽出
-│   ├── filter_critical.py            # CRITICAL抽出
+│   ├── filter_critical_and_merge.py  # CRITICAL抽出 + マージ
 │   │
 │   ├── # 最終出力モジュール
-│   ├── final_merge.py                # 最終マージ
 │   ├── export_excel.py               # Excel出力
 │   └── cleanup_all.py                # 全ディレクトリクリーンアップ
 │
@@ -813,8 +833,7 @@ juniper-syslog-filter/
 │   ├── test_extract_protocol.py
 │   ├── test_extract_severity_level.py
 │   ├── test_extract_severity.py
-│   ├── test_filter_critical.py
-│   ├── test_final_merge.py
+│   ├── test_filter_critical_and_merge.py
 │   ├── test_export_excel.py
 │   ├── test_cleanup_all.py
 │   └── test_integration.py
@@ -857,6 +876,10 @@ juniper-syslog-filter/
 - **GPT/Claude活用**: 学習パートナーとしての活用
 - **ユーザー視点**: オペレーターの作業負担を考慮した設計
 
+### 開発アプローチ
+
+本プロジェクトの設計および実装においては、生成AI（ChatGPT/Claude）を補助的な壁打ち・設計整理ツールとして活用しています。ただし、**処理方針の決定、検証、実装、テストはすべて開発者自身が行っており**、AIはあくまで思考の整理やコード品質向上のサポート役として位置づけています。
+
 ---
 
 ## 🔮 今後の展望
@@ -898,8 +921,8 @@ MIT License
 | 2025-12-16 | 1.0.0      | 初版作成・設計書完成                                                       |
 | 2025-12-16 | 1.1.0      | 詳細な処理フロー反映・14モジュール構成に更新                               |
 | 2025-12-16 | 1.2.0      | 開発環境セットアップ追加（uv + venv + VSCode + PowerShell）                |
-| 2025-12-19 | 2.0.0      | pandas方針追加・scripts/ディレクトリ追加・サンプルデータ生成スクリプト統合 |
-
-| 2025-12-18 | 2.1.0      | pandas実装完了・インターフェース設計を実際の実装に更新（List[Path]方式） |
+| 2025-12-18 | 2.0.0      | pandas方針追加・scripts/ディレクトリ追加・サンプルデータ生成スクリプト統合 |
+| 2025-12-18 | 2.1.0      | pandas実装完了・インターフェース設計を実際の実装に更新（List[Path]方式）   |
+| 2025-12-19 | 2.2.0      | Phase 10統合反映・開発環境設定ファイル追加・AI利用方針明記                 |
 
 ---
