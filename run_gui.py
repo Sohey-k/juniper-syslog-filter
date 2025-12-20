@@ -1,5 +1,11 @@
 """
-Juniper Syslog Filter - GUI版（Streamlit）
+Juniper Syslog Filter - GUI版（Streamlit - ハイブリッド版 Final）
+
+パラメータ変更可能 + リアルタイム進捗表示 + 経過時間表示
+- CLI並みの速度（subprocess経由）
+- GUI上でキーワード・Severity変更可能
+- リアルタイム進捗表示
+- 経過時間表示
 
 実行方法:
     streamlit run run_gui.py
@@ -7,32 +13,19 @@ Juniper Syslog Filter - GUI版（Streamlit）
 
 import streamlit as st
 from pathlib import Path
+import subprocess
 import sys
+import threading
+import time
+import os  # ← 追加
 
-# プロジェクトルートをPythonパスに追加
+# プロジェクトルート
 project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
-
-# モジュールのインポート
-from modules.extract import extract_zip
-from modules.filter_keyword import filter_keyword
-from modules.cleanup_temp import cleanup_processed_files
-from modules.merge_files import merge_csv_files
-from modules.reduce_columns import reduce_columns
-from modules.extract_routing import extract_routing
-from modules.split_ip import split_ip
-from modules.classify_ip import classify_ip
-from modules.extract_protocol import extract_protocol
-from modules.extract_severity_level import extract_severity_level
-from modules.extract_severity import extract_severity
-from modules.filter_critical_and_merge import filter_and_merge_critical
-from modules.export_excel import export_to_excel
-from modules.cleanup_all import cleanup_all_directories
 
 
 def main():
     """
-    Streamlit GUI メイン関数
+    Streamlit GUI メイン関数（ハイブリッド版 Final）
     """
     st.set_page_config(
         page_title="Juniper Syslog Filter", page_icon="🔥", layout="wide"
@@ -40,6 +33,12 @@ def main():
 
     st.title("🔥 Juniper Syslog Filter")
     st.markdown("---")
+
+    # セッションステートの初期化
+    if "process" not in st.session_state:
+        st.session_state.process = None
+    if "is_running" not in st.session_state:
+        st.session_state.is_running = False
 
     # サイドバー設定
     with st.sidebar:
@@ -50,6 +49,7 @@ def main():
             "フィルタキーワード",
             value="RT_IDP_ATTACK",
             help="ログから抽出するキーワードを指定",
+            disabled=st.session_state.is_running,
         )
 
         # Severityフィルタ
@@ -58,12 +58,20 @@ def main():
             options=["CRITICAL", "WARNING", "INFO"],
             index=0,
             help="抽出するSeverityレベルを選択",
+            disabled=st.session_state.is_running,
         )
 
         st.markdown("---")
 
-        # 実行ボタン
-        run_button = st.button("🚀 実行", type="primary", use_container_width=True)
+        st.info("💡 リアルタイム進捗表示（処理速度はCLI版が高速です）")
+
+        # 実行ボタンのみ
+        run_button = st.button(
+            "🚀 実行",
+            type="primary",
+            use_container_width=True,
+            disabled=st.session_state.is_running,
+        )
 
     # メインエリア
     col1, col2 = st.columns([2, 1])
@@ -72,181 +80,215 @@ def main():
         st.subheader("📊 処理ステータス")
         status_placeholder = st.empty()
 
+        st.subheader("📝 処理ログ")
+        log_placeholder = st.empty()
+
     with col2:
-        st.subheader("📈 統計情報")
-        stats_placeholder = st.empty()
+        st.subheader("📋 設定確認")
+        st.code(
+            f"""
+キーワード: {keyword}
+Severity: {severity_filter}
+        """
+        )
 
     # 実行処理
     if run_button:
         try:
-            # ディレクトリパス設定
-            source_dir = project_root / "source_logs"
-            temp_dir = project_root / "temp_extracted"
-            filtered_dir = project_root / "filtered_logs"
-            merged_dir = project_root / "merged_logs"
-            reduced_dir = project_root / "reduced_logs"
-            routed_dir = project_root / "routed_logs"
-            splitted_dir = project_root / "splitted_logs"
-            classified_dir = project_root / "classified_logs"
-            protocol_dir = project_root / "protocol_extracted"
-            severity_dir = project_root / "severity_level_extracted"
-            severity_extracted_dir = project_root / "severity_extracted"
-            critical_dir = project_root / "critical_only"
-            final_output_dir = project_root / "final_output"
+            # 処理開始
+            st.session_state.is_running = True
+            status_placeholder.info("🔄 処理開始...")
 
-            with st.spinner("処理中..."):
-                # 統計情報
-                stats = {"処理済みZIP": 0, "フィルタ行数": 0, "最終出力行数": 0}
+            # ログを格納するリスト
+            log_lines = []
 
-                # Phase 1: ループ処理
-                status_placeholder.info("🔄 Phase 1: ZIP展開 + フィルタリング")
+            # 環境変数でバッファリングを完全無効化
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
 
-                processed_count = 0
-                total_filtered = 0
+            # サブプロセスで実行（リアルタイム出力）
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-u",  # バッファリング無効化
+                    "run_with_args.py",
+                    "--keyword",
+                    keyword,
+                    "--severity",
+                    severity_filter,
+                ],
+                cwd=str(project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,  # 行バッファリング
+                env=env,  # ← 環境変数を設定
+            )
 
-                while True:
-                    zip_files = sorted(source_dir.glob("*.zip"))
-                    if not zip_files:
-                        break
+            # セッションステートに保存
+            st.session_state.process = process
 
-                    current_zip = zip_files[0]
-                    extracted_csvs = extract_zip(current_zip, temp_dir)
-                    filtered_count = filter_keyword(
-                        extracted_csvs, filtered_dir, keyword=keyword
-                    )
-                    cleanup_processed_files(current_zip, extracted_csvs, verbose=False)
+            # 出力をリアルタイムで読み取り
+            status_placeholder.info("🔄 ETLパイプライン実行中...")
 
-                    processed_count += 1
-                    total_filtered += filtered_count
+            # 処理開始時刻を記録
+            start_time = time.time()
 
-                    # 統計更新
-                    stats["処理済みZIP"] = processed_count
-                    stats["フィルタ行数"] = total_filtered
-                    stats_placeholder.json(stats)
+            try:
+                for line in iter(process.stdout.readline, ""):
+                    if line:
+                        log_lines.append(line.rstrip())
 
-                # Phase 2: マージ
-                status_placeholder.info("🔄 Phase 2: マージ処理")
-                filtered_files = sorted(filtered_dir.glob("*.csv"))
-                if filtered_files:
-                    merged_files = merge_csv_files(
-                        filtered_files, merged_dir, max_rows=800000, verbose=False
-                    )
+                        # 経過時間を計算
+                        elapsed = time.time() - start_time
+                        elapsed_min = int(elapsed // 60)
+                        elapsed_sec = int(elapsed % 60)
 
-                # Phase 3-11: 変換処理（簡略表示）
-                status_placeholder.info("🔄 Phase 3-11: データ変換処理")
+                        # 最新50行をログ表示（スクロール対策）
+                        display_lines = log_lines[-50:]
 
-                # 列削除
-                merged_files = sorted(merged_dir.glob("*.csv"))
-                if merged_files:
-                    reduced_files = reduce_columns(
-                        merged_files,
-                        reduced_dir,
-                        keep_columns=[0, 1, 2, 6],
-                        verbose=False,
-                    )
+                        # codeブロックで表示（text_areaより更新が確実）
+                        log_placeholder.code("\n".join(display_lines), language=None)
 
-                # routing抽出
-                reduced_files = sorted(reduced_dir.glob("*.csv"))
-                if reduced_files:
-                    routed_files = extract_routing(
-                        reduced_files, routed_dir, verbose=False
-                    )
+                        # Phase完了を検出してステータス更新（経過時間付き）
+                        if "[OK] Phase" in line:
+                            phase_num = line.split("Phase")[1].strip().split()[0]
+                            status_placeholder.info(
+                                f"🔄 Phase {phase_num} 完了... ⏱️ 経過時間: {elapsed_min}分{elapsed_sec}秒"
+                            )
+                        else:
+                            # Phase完了以外の行でも定期的に経過時間を更新
+                            status_placeholder.info(
+                                f"🔄 ETLパイプライン実行中... ⏱️ 経過時間: {elapsed_min}分{elapsed_sec}秒"
+                            )
 
-                # IP分割
-                routed_files = sorted(routed_dir.glob("*.csv"))
-                if routed_files:
-                    splitted_files = split_ip(routed_files, splitted_dir, verbose=False)
+                        # Streamlitの更新を確実にするため、わずかに待機
+                        time.sleep(0.01)
 
-                # IP分類
-                splitted_files = sorted(splitted_dir.glob("*.csv"))
-                if splitted_files:
-                    classified_files = classify_ip(
-                        splitted_files, classified_dir, verbose=False
-                    )
+                # プロセス終了待機
+                process.stdout.close()
+                return_code = process.wait()
 
-                # protocol抽出
-                classified_files = sorted(classified_dir.glob("*.csv"))
-                if classified_files:
-                    protocol_files = extract_protocol(
-                        classified_files, protocol_dir, verbose=False
-                    )
+                # 合計実行時間を計算
+                total_time = time.time() - start_time
+                total_min = int(total_time // 60)
+                total_sec = int(total_time % 60)
 
-                # SeverityLevel抽出
-                protocol_files = sorted(protocol_dir.glob("*.csv"))
-                if protocol_files:
-                    severity_level_files = extract_severity_level(
-                        protocol_files, severity_dir, verbose=False
-                    )
+            except Exception as e:
+                # エラーが発生した場合
+                status_placeholder.error(f"❌ 実行中にエラーが発生しました")
+                st.exception(e)
+                st.session_state.is_running = False
+                st.session_state.process = None
+                return
 
-                # Severity抽出
-                severity_level_files = sorted(severity_dir.glob("*.csv"))
-                if severity_level_files:
-                    severity_extracted_files = extract_severity(
-                        severity_level_files, severity_extracted_dir, verbose=False
-                    )
-
-                # Phase 10: CRITICAL抽出 + マージ
-                status_placeholder.info(f"🔄 Phase 10: {severity_filter}抽出 + マージ")
-                severity_extracted_files = sorted(severity_extracted_dir.glob("*.csv"))
-                if severity_extracted_files:
-                    critical_output = critical_dir / "critical_merged.csv"
-                    result = filter_and_merge_critical(
-                        severity_extracted_files,
-                        critical_output,
-                        severity_filter=severity_filter,
-                        verbose=False,
-                    )
-
-                    if result:
-                        # 最終行数をカウント
-                        import pandas as pd
-
-                        df = pd.read_csv(result)
-                        stats["最終出力行数"] = len(df)
-                        stats_placeholder.json(stats)
-
-                # Phase 11: Excel出力
-                status_placeholder.info("🔄 Phase 11: Excel出力")
-                critical_file = critical_dir / "critical_merged.csv"
-                if critical_file.exists():
-                    excel_output = export_to_excel(
-                        critical_file, final_output_dir, verbose=False
-                    )
-
-                # Phase 12: クリーンアップ
-                status_placeholder.info("🔄 Phase 12: クリーンアップ")
-                cleanup_all_directories(project_root, verbose=False)
-
-                # 完了
-                status_placeholder.success(f"✅ 処理完了！出力: {excel_output.name}")
+            # 結果判定
+            if return_code == 0:
+                status_placeholder.success(
+                    f"✅ 処理完了！⏱️ 合計実行時間: {total_min}分{total_sec}秒"
+                )
                 st.balloons()
 
+                # 出力ファイル確認
+                final_output_dir = project_root / "final_output"
+                excel_files = list(final_output_dir.glob("*.xlsx"))
+
+                if excel_files:
+                    st.success(f"📊 {len(excel_files)}個のExcelファイルを出力しました")
+
+                    # ファイル一覧表示
+                    with st.expander("📁 出力ファイル一覧", expanded=True):
+                        for excel_file in sorted(excel_files):
+                            st.write(f"✅ {excel_file.name}")
+                else:
+                    st.warning(
+                        "⚠️ 出力ファイルがありません（フィルタ条件に一致する行がなかった可能性があります）"
+                    )
+
+                # 完全なログを表示
+                with st.expander("📝 完全なログ"):
+                    st.text("\n".join(log_lines))
+
+            else:
+                status_placeholder.error(
+                    f"❌ エラーが発生しました（終了コード: {return_code}）"
+                )
+
+                # エラーログ表示
+                st.error("エラー詳細:")
+                st.text("\n".join(log_lines))
+
+            # 処理完了後、状態をリセット
+            st.session_state.is_running = False
+            st.session_state.process = None
+
         except Exception as e:
-            status_placeholder.error(f"❌ エラーが発生しました: {str(e)}")
+            status_placeholder.error(f"❌ 実行エラー: {str(e)}")
             st.exception(e)
+            st.session_state.is_running = False
+            st.session_state.process = None
 
     else:
-        # 初期状態
-        status_placeholder.info("⏸️ 設定を確認して「実行」ボタンをクリックしてください")
+        # 初期状態（実行されていない場合）
+        if not st.session_state.is_running:
+            status_placeholder.info(
+                "⏸️ 設定を確認して「実行」ボタンをクリックしてください"
+            )
 
-        # 説明
-        st.markdown("### 📝 使い方")
-        st.markdown(
+            # 説明
+            st.markdown("### 📝 使い方")
+            st.markdown(
+                """
+            1. **source_logs/** ディレクトリにZIPファイルを配置
+            2. サイドバーで設定を確認（必要に応じて変更）
+            3. 「実行」ボタンをクリック
+            4. リアルタイムで処理ログと経過時間を確認
+            5. 約13分で完了
+            6. 処理完了後、**final_output/** にExcelファイルが出力されます
             """
-        1. **source_logs/** ディレクトリにZIPファイルを配置
-        2. サイドバーで設定を確認
-        3. 「実行」ボタンをクリック
-        4. 処理完了後、**final_output/** にExcelファイルが出力されます
-        """
-        )
+            )
 
-        st.markdown("### 📋 現在の設定")
-        st.code(
-            f"""
-キーワード: {keyword}
-Severityフィルタ: {severity_filter}
-        """
-        )
+            st.markdown("### ⚡ ハイブリッド版の特徴")
+
+            col_a, col_b = st.columns(2)
+
+            with col_a:
+                st.markdown("**✅ できること**")
+                st.markdown(
+                    """
+                - GUI上でキーワード変更
+                - GUI上でSeverity変更
+                - **リアルタイム進捗表示** ✨
+                - **経過時間表示** ⏱️
+                - Phase別の進捗確認
+                - 実行ログの確認
+                - 出力ファイル一覧の表示
+                
+                ⚠️ **処理速度について**: CLIの方が高速です。速さを求める場合はCLI版をお勧めします。
+                """
+                )
+
+            with col_b:
+                st.markdown("**⏱️ 経過時間について**")
+                st.markdown(
+                    """
+                - リアルタイムで経過時間を表示
+                - Phase完了ごとに更新
+                - 完了時に合計時間を表示
+                - 処理の進捗が一目でわかる
+                """
+                )
+
+            st.markdown("### 📊 バージョン比較")
+            comparison_data = {
+                "バージョン": ["通常GUI", "v1", "v2", "**v3 Final**"],
+                "速度": ["13分", "13分", "13分", "**13分**"],
+                "進捗表示": ["詳細", "なし", "リアルタイム", "**リアルタイム**"],
+                "経過時間": ["なし", "なし", "なし", "**あり** ⏱️"],
+            }
+            st.table(comparison_data)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ ETLパイプラインの統合実行
 
 from pathlib import Path
 import sys
+import time
 
 # プロジェクトルートをPythonパスに追加
 project_root = Path(__file__).parent
@@ -23,15 +24,28 @@ from modules.classify_ip import classify_ip
 from modules.extract_protocol import extract_protocol
 from modules.extract_severity_level import extract_severity_level
 from modules.extract_severity import extract_severity
-from modules.filter_critical_and_merge import filter_and_merge_critical
+from modules.filter_critical import filter_critical
 from modules.export_excel import export_to_excel
 from modules.cleanup_all import cleanup_all_directories
+
+
+def format_elapsed_time(start_time):
+    """
+    経過時間を整形して返す
+    """
+    elapsed = time.time() - start_time
+    minutes = int(elapsed // 60)
+    seconds = int(elapsed % 60)
+    return f"{minutes}分{seconds}秒"
 
 
 def main():
     """
     メイン処理
     """
+    # 処理開始時刻を記録
+    start_time = time.time()
+
     print("=" * 70)
     print("Juniper Syslog Filter - Starting...")
     print("=" * 70)
@@ -48,6 +62,7 @@ def main():
     protocol_dir = project_root / "protocol_extracted"
     severity_dir = project_root / "severity_level_extracted"
     severity_extracted_dir = project_root / "severity_extracted"
+    critical_dir = project_root / "critical_only"
     final_output_dir = project_root / "final_output"
 
     try:
@@ -93,7 +108,7 @@ def main():
             print(f"\n✅ {processed_count}個のZIPファイルを処理しました")
 
         print("\n" + "=" * 70)
-        print("✅ Phase 1 完了")
+        print(f"✅ Phase 1 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
         print("=" * 70)
 
         # Phase 2: マージ処理
@@ -117,13 +132,17 @@ def main():
             print(f"✓ ({len(merged_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 2 完了")
+            print(f"✅ Phase 2 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # filtered_logs/ 内の全CSVを削除
         print(f"  └─ クリーンアップ中...", end=" ")
         cleanup_directory(filtered_dir, "*.csv", verbose=False)
         print("✓")
+
+        # Phase 3: 列削減処理
+        print("\n[Phase 3] 列削減処理開始")
+        print("-" * 70)
 
         # merged_logs/ の全CSVから不要列を削除
         merged_files = sorted(merged_dir.glob("*.csv"))
@@ -143,7 +162,7 @@ def main():
             print(f"✓ ({len(reduced_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 3 完了")
+            print(f"✅ Phase 3 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # merged_dir/ 内の全CSVを削除
@@ -170,7 +189,7 @@ def main():
             print(f"✓ ({len(routed_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 4 完了")
+            print(f"✅ Phase 4 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # reduced_dir/ 内の全CSVを削除
@@ -197,7 +216,7 @@ def main():
             print(f"✓ ({len(splitted_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 5 完了")
+            print(f"✅ Phase 5 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # routed_dir/ 内の全CSVを削除
@@ -226,7 +245,7 @@ def main():
             print(f"✓ ({len(classified_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 6 完了")
+            print(f"✅ Phase 6 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # splitted_dir/ 内の全CSVを削除
@@ -256,7 +275,7 @@ def main():
             print(f"✓ ({len(protocol_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 7 完了")
+            print(f"✅ Phase 7 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # classified_dir/ 内の全CSVを削除
@@ -286,7 +305,7 @@ def main():
             print(f"✓ ({len(severity_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 8 完了")
+            print(f"✅ Phase 8 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # protocol_dir/ 内の全CSVを削除
@@ -316,7 +335,7 @@ def main():
             print(f"✓ ({len(severity_extracted_files)}ファイル作成)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 9 完了")
+            print(f"✅ Phase 9 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # severity_dir/ 内の全CSVを削除
@@ -324,33 +343,33 @@ def main():
         cleanup_directory(severity_dir, "*.csv", verbose=False)
         print("✓")
 
-        # Phase 10: CRITICAL抽出 + マージ処理
-        print("\n[Phase 10] CRITICAL抽出 + マージ処理開始")
+        # Phase 10: CRITICAL抽出処理
+        print("\n[Phase 10] CRITICAL抽出処理開始")
         print("-" * 70)
 
-        # severity_extracted/ の全CSVからCRITICAL行を抽出してマージ
         severity_extracted_files = sorted(severity_extracted_dir.glob("*.csv"))
 
         if not severity_extracted_files:
             print("\n⚠️  処理するファイルがありません")
         else:
-            critical_dir = project_root / "critical_only"
-            critical_output = critical_dir / "critical_merged.csv"
             print(f"📄 対象ファイル数: {len(severity_extracted_files)}")
             print(f"フィルタ条件: Severity=CRITICAL")
-            print(f"🔍 CRITICAL抽出 + マージ中...", end=" ")
+            print(f"🔍 CRITICAL抽出中...", end=" ")
 
-            result = filter_and_merge_critical(
-                severity_extracted_files, critical_output, verbose=False
+            critical_files = filter_critical(
+                severity_extracted_files,
+                critical_dir,
+                severity_filter="CRITICAL",
+                verbose=False,
             )
 
-            if result:
-                print(f"✓ ({result.name})")
+            if critical_files:
+                print(f"✓ ({len(critical_files)}ファイル)")
             else:
                 print("⚠️  CRITICAL行なし")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 10 完了")
+            print(f"✅ Phase 10 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
         # severity_extracted_dir/ 内の全CSVを削除
@@ -362,26 +381,29 @@ def main():
         print("\n[Phase 11] Excel最終出力処理開始")
         print("-" * 70)
 
-        # critical_only/critical_merged.csv をExcel化
-        critical_file = critical_dir / "critical_merged.csv"
+        # critical_only/*.csv を全てExcel化
+        critical_files = sorted(critical_dir.glob("*.csv"))
 
-        if not critical_file.exists():
-            print("\n⚠️  critical_merged.csvが存在しません")
+        if not critical_files:
+            print("\n⚠️  CRITICALファイルが存在しません")
         else:
-            print(f"📄 入力ファイル: {critical_file.name}")
+            print(f"📄 対象ファイル数: {len(critical_files)}")
             print(f"📊 Excel出力中...", end=" ")
 
-            excel_output = export_to_excel(
-                critical_file, final_output_dir, verbose=False
-            )
+            excel_count = 0
+            for critical_file in critical_files:
+                excel_output = export_to_excel(
+                    critical_file, final_output_dir, verbose=False
+                )
+                excel_count += 1
 
-            print(f"✓ ({excel_output.name})")
+            print(f"✓ ({excel_count}ファイル)")
 
             print("\n" + "=" * 70)
-            print("✅ Phase 11 完了")
+            print(f"✅ Phase 11 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
             print("=" * 70)
 
-            # Phase 12: 全ディレクトリクリーンアップ
+        # Phase 12: 全ディレクトリクリーンアップ
         print("\n[Phase 12] 全ディレクトリクリーンアップ開始")
         print("-" * 70)
         print("🗑️  中間ディレクトリを削除中...", end=" ")
@@ -391,7 +413,12 @@ def main():
         print(f"✓ ({deleted_count}ディレクトリ)")
 
         print("\n" + "=" * 70)
-        print("✅ Phase 12 完了")
+        print(f"✅ Phase 12 完了 ⏱️  経過時間: {format_elapsed_time(start_time)}")
+        print("=" * 70)
+
+        # 合計実行時間を表示
+        total_time = format_elapsed_time(start_time)
+        print(f"🎉 全処理完了！ ⏱️  合計実行時間: {total_time}")
         print("=" * 70)
 
     except Exception as e:

@@ -1,17 +1,16 @@
 """
-Excel出力モジュール
+Excel出力モジュール（xlsxwriter版 - 高速）
 
-critical_merged.csv を Excel形式で出力
+critical_only/*.csv を Excel形式で出力
 - フォント: 游ゴシック 11pt
 - ヘッダー: 太字
 - 列幅: 自動調整
+- openpyxlより2-3倍速い
 """
 
 from pathlib import Path
 from typing import Union
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import Font
 
 
 class ExportExcelError(Exception):
@@ -30,7 +29,7 @@ def export_to_excel(
     verbose: bool = True,
 ) -> Path:
     """
-    CSVファイルをExcel形式で出力
+    CSVファイルをExcel形式で出力（xlsxwriter使用 - 高速）
 
     Args:
         input_file: 入力CSVファイルのパス
@@ -50,12 +49,12 @@ def export_to_excel(
     Examples:
         >>> from pathlib import Path
         >>> output = export_to_excel(
-        ...     Path("critical_only/critical_merged.csv"),
+        ...     Path("critical_only/critical_001.csv"),
         ...     Path("final_output"),
         ...     verbose=True
         ... )
         >>> print(output)
-        final_output/critical_merged.xlsx
+        final_output/critical_001.xlsx
     """
     input_path = Path(input_file)
     output_dir = Path(output_dir)
@@ -78,50 +77,48 @@ def export_to_excel(
         if verbose:
             print(f"  📄 入力: {input_path.name} ({len(df)}行)")
 
-        # Excelに出力（一旦基本的な出力）
-        df.to_excel(output_path, index=False, engine="openpyxl")
+        # xlsxwriterでExcel出力（高速）
+        writer = pd.ExcelWriter(output_path, engine="xlsxwriter")
+        df.to_excel(writer, index=False, sheet_name="Sheet1")
 
-        if verbose:
-            print(f"  📊 Excel出力: {output_path.name}")
+        # ワークブックとワークシートを取得
+        workbook = writer.book
+        worksheet = writer.sheets["Sheet1"]
 
-        # openpyxlでフォーマット設定
-        wb = load_workbook(output_path)
-        ws = wb.active
+        # フォーマット定義
+        header_format = workbook.add_format(
+            {"font_name": font_name, "font_size": font_size, "bold": True}
+        )
 
-        # フォント設定
-        font = Font(name=font_name, size=font_size)
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.font = font
+        cell_format = workbook.add_format(
+            {"font_name": font_name, "font_size": font_size}
+        )
 
-        # ヘッダーを太字に
-        header_font = Font(name=font_name, size=font_size, bold=True)
-        for cell in ws[1]:
-            cell.font = header_font
+        # ヘッダー行にフォーマット適用
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
 
         # 列幅自動調整
-        for column in ws.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
+        for i, col in enumerate(df.columns):
+            # 列の最大文字数を計算
+            # ヘッダーとデータの両方から最大長を取得
+            column_len = df[col].astype(str).str.len().max()
+            column_len = (
+                max(column_len, len(str(col)))
+                if not pd.isna(column_len)
+                else len(str(col))
+            )
 
-            for cell in column:
-                try:
-                    if cell.value:
-                        # セル値の長さを計算（日本語は2文字分として計算）
-                        cell_length = len(str(cell.value))
-                        # 日本語文字を含む場合は幅を広げる
-                        if any(ord(char) > 127 for char in str(cell.value)):
-                            cell_length = int(cell_length * 1.5)
-                        max_length = max(max_length, cell_length)
-                except:
-                    pass
+            # 日本語補正（127以上のコードポイントがあれば）
+            if df[col].astype(str).str.contains("[^\x00-\x7f]", regex=True).any():
+                column_len = int(column_len * 1.5)
 
-            # 最小幅・最大幅に制限
-            adjusted_width = min(max(max_length + 2, min_width), max_width)
-            ws.column_dimensions[column_letter].width = adjusted_width
+            # 幅設定（最小・最大制限）
+            adjusted_width = min(max(column_len + 2, min_width), max_width)
+            worksheet.set_column(i, i, adjusted_width, cell_format)
 
         # 保存
-        wb.save(output_path)
+        writer.close()
 
         if verbose:
             print(f"  ✨ フォーマット適用完了")

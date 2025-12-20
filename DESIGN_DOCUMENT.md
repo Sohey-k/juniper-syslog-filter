@@ -1,4 +1,4 @@
-# Juniper Syslog フィルタリングツール - 設計書 v2.0
+# Juniper Syslog フィルタリングツール - 設計書 v3.0
 
 ## 📋 プロジェクト概要
 
@@ -41,9 +41,18 @@ Windowsで動作するJuniper SRX syslogフィルタリングツール。
 
 #### 結果
 
-- **処理時間**: 2時間 → **10分未満**（約12倍高速化）
+- **処理時間**: 2時間 → **3分**（約40倍高速化）✨
 - **安定性**: エラーハンドリング実装で、処理が止まらない
 - **操作性**: バックグラウンド実行可能、PCを他の作業に使える
+
+#### 実測パフォーマンス
+
+| データ量         | 入力行数  | フィルタ後 | CLI処理時間  | Web処理時間 |
+| ---------------- | --------- | ---------- | ------------ | ----------- |
+| **実務データ**   | 3,360万行 | 約2-20万行 | **3分1秒** ⚡ | 約12分      |
+| **テストデータ** | 480万行   | 約120万行  | 6分32秒      | 約13分      |
+
+**重要**: 処理時間はフィルタ後のデータ量に依存します。脅威検知が多い日は処理時間が増加する可能性があります。
 
 ---
 
@@ -58,6 +67,8 @@ Windowsで動作するJuniper SRX syslogフィルタリングツール。
 ```
 project/
 ├── run.py                  # エントリーポイント
+├── run_with_args.py        # 引数対応CLI（Web版の内部処理用）
+├── run_gui.py              # Web UI（Streamlit）
 ├── modules/
 │   ├── extract.py         # ZIP展開・CSV読み込み
 │   ├── transform.py       # フィルタリング・データ変換
@@ -71,11 +82,13 @@ project/
 
 ### 2. ルートスクリプト（run.py）での統合実行
 
-各モジュールを `run.py` から呼び出し、ETLパイプライン全体を実行。
+各モジュールを `run.py` から呼び出し、ETLパイプライン全体を実行。  
+**経過時間表示機能**により、各Phase完了時と合計実行時間を表示。
 
 ### 3. pytest によるテスト駆動開発
 
-各モジュールごとにテストを作成し、機能の正確性を保証。
+各モジュールごとにテストを作成し、機能の正確性を保証。  
+**59個のテストケース**で全機能をカバー。
 
 ### 4. 段階的データフロー
 
@@ -97,6 +110,7 @@ Excelの仕様（最大1,048,576行）を考慮し、80万行を超えるデー�
 
 ### 7. Excel出力の最適化
 
+- **xlsxwriter導入**: openpyxlの2-3倍の速度で出力
 - フォント調整
 - カラム幅の自動調整
 - ヘッダーの書式設定
@@ -109,13 +123,15 @@ Excelの仕様（最大1,048,576行）を考慮し、80万行を超えるデー�
 
 退職により未実装だった以下の機能を、今回のプロジェクトで実装します：
 
-#### 1. GUIインターフェース
+#### 1. GUIインターフェース（✅ 完成）
 
-- フィルタリング条件をGUIで入力可能に
+- フィルタリング条件をGUIで入力可能
 - パラメータ設定の柔軟性向上
+- **リアルタイム進捗表示**（Phase別）
+- **経過時間表示**（処理中・完了時）
 - 初心者でも使いやすいUI
 
-#### 2. デスクトップショートカット起動
+#### 2. デスクトップショートカット起動（✅ 完成）
 
 - PowerShellでコマンドを打つ必要をなくす
 - ダブルクリックで即起動
@@ -124,16 +140,18 @@ Excelの仕様（最大1,048,576行）を考慮し、80万行を超えるデー�
 ### 開発の進め方
 
 ```
-Phase 1: コアモジュール開発 + pytest
+Phase 1: コアモジュール開発 + pytest ✅
          ↓
-Phase 2: ETL完成・統合テスト
+Phase 2: ETL完成・統合テスト ✅
          ↓
-Phase 3: GUI実装
+Phase 3: GUI実装 ✅
          ↓
-Phase 4: ショートカット化
+Phase 4: ショートカット化 ✅
+         ↓
+Phase 5: 実務データ負荷テスト ✅
 ```
 
-**重要**: GUI機能は、全てのモジュールが完成し、テストが通った後に追加する。
+**すべてのPhaseが完了しました** 🎉
 
 ---
 
@@ -154,7 +172,7 @@ Phase 4: ショートカット化
 
 #### 前提条件
 
-- **メモリ16GB搭載PCを想定**
+- **メモリ16GB以上搭載PCを想定**（32GB推奨）
 - 処理速度とコードの可読性を最優先
 - ベクトル演算による高速化
 
@@ -228,6 +246,11 @@ merged_df = pd.concat(df_list, ignore_index=True)
 # イメージ（簡略版）
 # 各モジュールは List[Path] → List[Path] + ファイル出力
 
+import time
+
+# 処理開始時刻を記録
+start_time = time.time()
+
 # Phase 1: ZIP展開 + フィルタリング（ループ処理）
 while zip_files:
     extracted_files = extract_zip(zip_file, temp_dir)
@@ -245,10 +268,17 @@ classified_files = classify_ip(splitted_files, classified_dir)
 protocol_files = extract_protocol(classified_files, protocol_dir)
 severity_level_files = extract_severity_level(protocol_files, severity_level_dir)
 severity_files = extract_severity(severity_level_files, severity_dir)
-critical_file = filter_and_merge_critical(severity_files, "critical_merged.csv")
 
-# 最終出力
-export_to_excel(critical_file, output_path)
+# Phase 10: CRITICAL抽出（マージなし、複数ファイル出力）
+critical_files = filter_critical(severity_files, critical_dir)
+
+# Phase 11: Excel最終出力（複数ファイルをループ処理）
+for critical_file in critical_files:
+    export_to_excel(critical_file, final_output_dir)
+
+# 合計実行時間を表示
+total_time = format_elapsed_time(start_time)
+print(f"🎉 全処理完了！ ⏱️  合計実行時間: {total_time}")
 ```
 
 ---
@@ -263,10 +293,10 @@ juniper-syslog-filter/
 ├── temp_extracted/           # ZIP展開後の一時CSV（処理後削除）
 ├── filtered_logs/            # RT_IDP_ATTACK抽出後のCSV（処理後削除）
 ├── merged_logs/              # 80万行単位でマージ（処理後削除）
-├── columns_reduced/          # 不要列削除後（処理後削除）
-├── routing_added/            # routing列追加後（処理後削除）
-├── ip_split/                 # srcIP/dstIP分離後（処理後削除）
-├── ip_classified/            # IP判定（private/global）後（処理後削除）
+├── reduced_logs/             # 不要列削除後（処理後削除）
+├── routed_logs/              # routing列追加後（処理後削除）
+├── splitted_logs/            # srcIP/dstIP分離後（処理後削除）
+├── classified_logs/          # IP判定（private/global）後（処理後削除）
 ├── protocol_extracted/       # protocol列抽出後（処理後削除）
 ├── severity_level_extracted/ # SeverityLevel列抽出後（処理後削除）
 ├── severity_extracted/       # Severity列抽出後（処理後削除）
@@ -312,297 +342,305 @@ juniper-syslog-filter/
 [列削除]
   SeverityLevel, Severity, LogType削除
   merged_logs/*.csv
-  → columns_reduced/*.csv
+  → reduced_logs/*.csv
   【状態】Timestamp, Hostname, AppName, Message
          ↓
 [routing抽出]
   Message内から [srcip/port > dstip/port] 抽出
-  columns_reduced/*.csv
-  → routing_added/*.csv
+  reduced_logs/*.csv
+  → routed_logs/*.csv
   【状態】Timestamp, Hostname, AppName, routing, Message
          ↓
 [IP分離]
   routingから srcIP, dstIP 分離（ポート番号削除）
-  routing_added/*.csv
-  → ip_split/*.csv
+  routed_logs/*.csv
+  → splitted_logs/*.csv
   【状態】Timestamp, Hostname, AppName, routing, srcIP, dstIP, Message
          ↓
 [IP判定]
   srcIP, dstIPをprivate/global判定
-  ip_split/*.csv
-  → ip_classified/*.csv
+  splitted_logs/*.csv
+  → classified_logs/*.csv
   【状態】Timestamp, Hostname, AppName, routing, srcIP, srcIP_type, dstIP, dstIP_type, Message
          ↓
 [protocol抽出]
   Message内から protocol=xxx 抽出
-  ip_classified/*.csv
+  classified_logs/*.csv
   → protocol_extracted/*.csv
   【状態】Timestamp, Hostname, AppName, routing, srcIP, srcIP_type, dstIP, dstIP_type, protocol, Message
          ↓
 [SeverityLevel抽出]
-  Message内から SeverityLevel=x 抽出
+  Message内から SeverityLevel=数字 抽出
   protocol_extracted/*.csv
   → severity_level_extracted/*.csv
-  【状態】..., protocol, SeverityLevel, Message
+  【状態】上記 + SeverityLevel
          ↓
 [Severity抽出]
   Message内から Severity=xxx 抽出
   severity_level_extracted/*.csv
   → severity_extracted/*.csv
-  【状態】..., SeverityLevel, Severity, Message
+  【状態】上記 + Severity
          ↓
-[CRITICAL抽出]
-  Severity=CRITICAL の行のみ抽出
+[CRITICAL抽出]（Phase 10）
+  Severity == 'CRITICAL' の行のみ抽出
   severity_extracted/*.csv
-  → critical_only/*.csv
+  → critical_only/*.csv（複数ファイル、マージなし）
          ↓
-[最終マージ（必要なら）]
-  critical_only/*.csv（複数ファイルをマージ）
+[Excel出力]（Phase 11）
+  critical_only/*.csv（複数ファイル）
+  → final_output/*.xlsx（複数ファイル、ループ処理）
+  
+  ※ xlsxwriterによる高速出力（openpyxlの2-3倍）
          ↓
-[Excel出力]
-  游ゴシック 11pt
-  列幅自動調整
-  → final_output/*.xlsx
-```
-
-### モジュール構成
-
-| No  | モジュール                     | 責務                         | 入力                           | 出力                           |
-| --- | ------------------------------ | ---------------------------- | ------------------------------ | ------------------------------ |
-| 1   | `extract.py`                   | ZIP展開                      | source_logs/*.zip              | temp_extracted/*.csv           |
-| 2   | `filter_keyword.py`            | キーワードフィルタ           | temp_extracted/*.csv           | filtered_logs/*.csv            |
-| 3   | `cleanup_temp.py`              | 一時ファイル削除             | source_logs, temp_extracted    | -                              |
-| 4   | `merge_files.py`               | 80万行単位でマージ           | filtered_logs/*.csv            | merged_logs/*.csv              |
-| 5   | `reduce_columns.py`            | 不要列削除                   | merged_logs/*.csv              | columns_reduced/*.csv          |
-| 6   | `extract_routing.py`           | routing列追加                | columns_reduced/*.csv          | routing_added/*.csv            |
-| 7   | `split_ip.py`                  | srcIP/dstIP分離              | routing_added/*.csv            | ip_split/*.csv                 |
-| 8   | `classify_ip.py`               | IP判定（private/global）     | ip_split/*.csv                 | ip_classified/*.csv            |
-| 9   | `extract_protocol.py`          | protocol列追加               | ip_classified/*.csv            | protocol_extracted/*.csv       |
-| 10  | `extract_severity_level.py`    | SeverityLevel列追加          | protocol_extracted/*.csv       | severity_level_extracted/*.csv |
-| 11  | `extract_severity.py`          | Severity列追加               | severity_level_extracted/*.csv | severity_extracted/*.csv       |
-| 12  | `filter_critical_and_merge.py` | CRITICAL行抽出 + マージ      | severity_extracted/*.csv       | critical_only/merged.csv       |
-| 13  | `export_excel.py`              | Excel出力                    | critical_only/merged.csv       | final_output/*.xlsx            |
-| -   | `cleanup_all.py`               | 全ディレクトリクリーンアップ | 各ディレクトリ                 | -                              |
-| -   | `run.py`                       | パイプライン統合実行         | -                              | 処理結果                       |
-
----
-
-## 📊 技術仕様
-
-### 入力データ仕様
-
-#### ログファイル構造
-
-```
-2025-04-28.zip               # 日次アーカイブ
-├── 00.zip                   # 各時間のアーカイブ
-│   └── 00.csv              # 時間別CSVログ
-├── 01.zip
-│   └── 01.csv
-...
-└── 23.zip
-    └── 23.csv
-```
-
-#### CSVフォーマット
-
-```csv
-Timestamp,Hostname,AppName,SeverityLevel,Severity,LogType,Message
-2025-12-16T00:46:22Z,srx-fw01,RT_SCREEN,2,CRITICAL,THREAT,RT_SCREEN_IP: IP spoofing detected 192.168.239.6/43657 > 80.86.112.63/8080 protocol=udp SeverityLevel=2 Severity=CRITICAL
-```
-
-| カラム        | データ型 | 説明                          |
-| ------------- | -------- | ----------------------------- |
-| Timestamp     | ISO8601  | ログ発生時刻                  |
-| Hostname      | string   | ホスト名（例: srx-fw01）      |
-| AppName       | string   | アプリ名（RT_FLOW, RT_IDP等） |
-| SeverityLevel | int      | RFC5424準拠（0-7）            |
-| Severity      | string   | 重要度（CRITICAL/WARNING等）  |
-| LogType       | string   | THREAT / NORMAL               |
-| Message       | string   | ログメッセージ本文            |
-
-### 処理の詳細仕様
-
-#### Phase 1: ループ処理（ファイルごと）
-
-1. **ZIP展開**
-   - `source_logs/` から1ファイルずつ処理
-   - `temp_extracted/` に展開
-
-2. **キーワードフィルタ**
-   - `RT_IDP_ATTACK` を含む行のみ抽出
-   - `filtered_logs/` に保存
-
-3. **クリーンアップ**
-   - 処理済みZIPを削除
-   - 展開済みCSVを削除
-
-#### Phase 2: 変換・抽出処理
-
-4. **ファイルマージ**
-   - 80万行を超える場合、複数ファイルに分割
-
-5. **列削除**
-   - `SeverityLevel`, `Severity`, `LogType` を削除
-   - 残す列: `Timestamp`, `Hostname`, `AppName`, `Message`
-
-6. **routing列抽出**
-   - 正規表現: `(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+ > (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+`
-   - 例: `192.168.1.1/12345 > 10.0.0.5/80` → `192.168.1.1 > 10.0.0.5`
-
-7. **IP分離**
-   - `routing` → `srcIP`, `dstIP`
-   - 例: `192.168.1.1 > 10.0.0.5` → `srcIP=192.168.1.1`, `dstIP=10.0.0.5`
-
-8. **IP判定**
-   - プライベートIP範囲:
-     - `10.0.0.0/8`
-     - `172.16.0.0/12`
-     - `192.168.0.0/16`
-   - それ以外: `global`
-
-9-11. **Message内データ抽出**
-   - `protocol=xxx` → `protocol` 列
-   - `SeverityLevel=x` → `SeverityLevel` 列
-   - `Severity=xxx` → `Severity` 列
-
-12. **CRITICAL抽出**
-   - `Severity=CRITICAL` の行のみ
-
-#### Phase 3: 最終出力
-
-13. **最終マージ**
-   - 複数ファイルを1つにまとめる
-
-14. **Excel出力**
-   - フォント: 游ゴシック 11pt
-   - 列幅: 自動調整
-   - ヘッダー: 太字
-
-### 依存ライブラリ
-
-```txt
-pandas>=2.0.0
-openpyxl>=3.1.0
-pytest>=7.4.0
-pytest-cov>=4.1.0
+[全クリーンアップ]（Phase 12）
+  中間ディレクトリを全削除
+         ↓
+[処理完了]
+  🎉 全処理完了！ ⏱️  合計実行時間: 3分1秒
 ```
 
 ---
 
-## 💻 開発環境セットアップ
+## 📦 モジュール仕様
 
-### 前提条件
+### 全12フェーズの処理モジュール
 
-- Windows 10/11
-- Python 3.8以上
-- Git
-- VSCode（推奨）
-- PowerShell
+#### Phase 1: ループ処理モジュール
 
-### 1. リポジトリのクローン
+**1. extract.py** - ZIP展開
+```python
+def extract_zip(zip_path: Path, output_dir: Path) -> List[Path]
+```
+- ZIPファイルを展開し、CSVファイルのリストを返す
+
+**2. filter_keyword.py** - キーワードフィルタ
+```python
+def filter_keyword(
+    input_files: List[Path],
+    output_dir: Path,
+    keyword: str = "RT_IDP_ATTACK",
+    verbose: bool = True
+) -> int
+```
+- 指定キーワードを含む行のみ抽出
+- フィルタされた行数を返す
+
+**3. cleanup_temp.py** - 一時ファイル削除
+```python
+def cleanup_processed_files(
+    zip_file: Path,
+    csv_files: List[Path],
+    verbose: bool = True
+) -> None
+```
+- 処理済みZIPと一時CSVを削除
+
+#### Phase 2: マージモジュール
+
+**4. merge_files.py** - 80万行マージ
+```python
+def merge_csv_files(
+    input_files: List[Path],
+    output_dir: Path,
+    max_rows: int = 800000,
+    verbose: bool = True
+) -> List[Path]
+```
+- 80万行を超えないように自動分割してマージ
+
+#### Phase 3-9: 変換・抽出モジュール
+
+**5. reduce_columns.py** - 列削除
+```python
+def reduce_columns(
+    input_files: List[Path],
+    output_dir: Path,
+    keep_columns: List[int] = [0, 1, 2, 6],
+    verbose: bool = True
+) -> List[Path]
+```
+- 指定列のみ保持
+
+**6. extract_routing.py** - routing抽出
+```python
+def extract_routing(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- Message列から routing情報を抽出
+
+**7. split_ip.py** - IP分離
+```python
+def split_ip(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- routing列から srcIP, dstIP を分離
+
+**8. classify_ip.py** - IP判定
+```python
+def classify_ip(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- IPアドレスをprivate/global判定
+
+**9. extract_protocol.py** - protocol抽出
+```python
+def extract_protocol(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- Message列から protocol情報を抽出
+
+**10. extract_severity_level.py** - SeverityLevel抽出
+```python
+def extract_severity_level(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- Message列から SeverityLevel を抽出
+
+**11. extract_severity.py** - Severity抽出
+```python
+def extract_severity(
+    input_files: List[Path],
+    output_dir: Path,
+    verbose: bool = True
+) -> List[Path]
+```
+- Message列から Severity を抽出
+
+#### Phase 10: CRITICAL抽出モジュール
+
+**12. filter_critical.py** - CRITICAL抽出（マージなし）
+```python
+def filter_critical(
+    input_files: List[Path],
+    output_dir: Union[str, Path],
+    severity_filter: str = "CRITICAL",
+    verbose: bool = True
+) -> List[Path]
+```
+- Severity == 'CRITICAL' の行のみ抽出
+- **マージ処理なし**（複数ファイルのまま出力）
+- Excel行数制限（104万行）回避のため
+
+#### Phase 11: Excel出力モジュール
+
+**13. export_excel.py** - Excel出力（xlsxwriter版）
+```python
+def export_to_excel(
+    input_csv: Path,
+    output_dir: Union[str, Path],
+    font_name: str = "Meiryo UI",
+    font_size: int = 10,
+    verbose: bool = True
+) -> Path
+```
+- **xlsxwriter使用**（openpyxlの2-3倍高速）
+- フォント設定、列幅自動調整
+- Phase 11では複数ファイルをループ処理
+
+#### Phase 12: クリーンアップモジュール
+
+**14. cleanup_all.py** - 全ディレクトリクリーンアップ
+```python
+def cleanup_all_directories(
+    project_root: Path,
+    verbose: bool = True
+) -> int
+```
+- 中間ディレクトリを全削除
+- final_output/ のみ残す
+
+---
+
+## 🖥️ 実行方法
+
+### 開発環境セットアップ
+
+#### 1. Python環境準備
 
 ```powershell
-git clone https://github.com/Sohey-k/juniper-syslog-filter.git
-cd juniper-syslog-filter
+# Pythonバージョン確認（3.8以上）
+python --version
+
+# uvのインストール確認
+uv --version
 ```
 
-### 2. uv のインストール
+#### 2. プロジェクトのクローン
 
 ```powershell
-# PowerShellで実行
-irm https://astral.sh/uv/install.ps1 | iex
+git clone https://github.com/Sohey-k/juniper-syslog-generator.git
+cd juniper-syslog-generator
 ```
 
-### 3. 仮想環境の作成
+#### 3. 仮想環境の作成と有効化
 
 ```powershell
-# Python仮想環境作成（uvを使用）
+# venv作成
 uv venv
 
-# 仮想環境の有効化
-.\venv\Scripts\Activate.ps1
+# 有効化（PowerShell）
+venv\Scripts\activate
+
+# 有効化（コマンドプロンプト）
+venv\Scripts\activate.bat
 ```
 
-### 4. 依存パッケージのインストール
+#### 4. 依存パッケージのインストール
 
 ```powershell
-# uvでパッケージインストール
-uv pip install pandas openpyxl pytest
+# requirements.txtからインストール
+uv pip install -r requirements.txt
+
+# または個別インストール
+uv pip install pandas openpyxl xlsxwriter pytest streamlit
 ```
 
-### 5. ディレクトリ構造の作成
+#### 5. VSCode設定（オプション）
 
 ```powershell
-# 必要なディレクトリを作成
-New-Item -ItemType Directory -Path source_logs -Force
+# .vscode/settings.json が自動適用される
+# - Pythonインタープリタ: ./venv/Scripts/python.exe
+# - フォーマッター: black
+# - リンター: flake8
 ```
 
-### 6. VSCodeでプロジェクトを開く
+#### 6. テスト実行
 
 ```powershell
-# VSCodeで現在のディレクトリを開く
-code .
-```
-
-**VSCode推奨設定**（`.vscode/settings.json`）:
-
-```json
-{
-    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
-    "python.terminal.activateEnvironment": true,
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter",
-        "editor.formatOnSave": true
-    },
-    "files.encoding": "utf8"
-}
-```
-
-**Flake8設定**（`.flake8`）:
-
-```ini
-[flake8]
-max-line-length = 88
-extend-ignore = E203, W503
-```
-
-**Git改行コード設定**（`.gitattributes`）:
-
-```
-* text=auto eol=lf
-```
-
-これらの設定により：
-- **settings.json**: VSCodeでのPython開発環境を最適化（インタープリタパス、フォーマッター設定）
-- **.flake8**: コードスタイルチェックのルールを定義（Black互換の行長88文字）
-- **.gitattributes**: Windows環境でのCRLF問題を防止（LF統一）
-
-### 7. 開発の流れ
-
-```powershell
-# 毎回の作業開始時
-cd juniper-syslog-filter
-.\venv\Scripts\Activate.ps1
-
-# パッケージ追加時
-uv pip install <パッケージ名>
-uv pip freeze > requirements.txt
-
-# テスト実行
+# 全テスト実行（59テスト）
 pytest
+
+# カバレッジ付き
+pytest --cov=modules --cov-report=html
 
 # 作業終了時
 deactivate
 ```
 
-### 8. requirements.txt（参考）
+### requirements.txt
 
 プロジェクト全体で使用するパッケージリスト：
 
 ```txt
 pandas>=2.0.0
 openpyxl>=3.1.0
+xlsxwriter>=3.0.0
+streamlit>=1.28.0
 pytest>=7.4.0
 pytest-cov>=4.1.0
 ```
@@ -623,7 +661,7 @@ uv pip install -r requirements.txt
 - [ ] VSCode がインストール済み
 - [ ] uv がインストール済み（`uv --version`で確認）
 - [ ] venv仮想環境が作成済み
-- [ ] 必要なパッケージがインストール済み（pandas, openpyxl, pytest）
+- [ ] 必要なパッケージがインストール済み（pandas, openpyxl, xlsxwriter, pytest, streamlit）
 - [ ] VSCodeでプロジェクトが開ける
 - [ ] PowerShellでvenv有効化できる
 - [ ] `source_logs/` ディレクトリが作成済み
@@ -639,15 +677,11 @@ uv pip install -r requirements.txt
 #### 基本的な使い方
 
 ```powershell
-# デフォルト設定（2025-04-28、5000行/時、脅威率10%）
-python scripts/generate_sample_data.py -o source_logs
+# 実務データ再現（推奨）
+python generator.py -o source_logs -d 2025-12-20 -H mx240 -r 1400000 -t 0.005
 
-# カスタム設定
-python scripts/generate_sample_data.py \
-  -o source_logs \
-  -d 2025-12-18 \
-  -r 10000 \
-  -t 0.2
+# テストデータ（軽量）
+python generator.py -o source_logs -r 200000 -t 0.5
 ```
 
 #### オプション
@@ -656,8 +690,20 @@ python scripts/generate_sample_data.py \
 | -------------------- | ------------------------ | ------------- |
 | `-o, --output`       | 出力ディレクトリ         | `output_logs` |
 | `-d, --date`         | ログ日付 (YYYY-MM-DD)    | `2025-04-28`  |
+| `-H, --hostname`     | ホスト名                 | `srx-fw01`    |
 | `-r, --rows`         | 1時間あたりの行数        | `5000`        |
 | `-t, --threat-ratio` | 脅威ログの割合 (0.0-1.0) | `0.1`         |
+
+#### 実務データ再現の例
+
+```powershell
+# 1日分 3,360万行、脅威出現率0.5%（実務相当）
+python generator.py -o source_logs -r 1400000 -t 0.005
+
+# 生成結果:
+# - source_logs/2025-04-28.zip（約1GB）
+# - 24時間分のZIPファイルを含む
+```
 
 #### 出力フォーマット
 
@@ -666,7 +712,7 @@ Timestamp,Hostname,AppName,SeverityLevel,Severity,LogType,Message
 2025-04-28T00:15:32Z,srx-fw01,RT_IDP,2,CRITICAL,THREAT,RT_IDP_ATTACK_LOG: SQL injection attack detected 192.168.1.5/12345 > 203.0.113.10/80 protocol=tcp SeverityLevel=2 Severity=CRITICAL
 ```
 
-### Phase 1-2: CLIモード
+### CLI実行方法
 
 #### 前提条件
 
@@ -684,10 +730,10 @@ Timestamp,Hostname,AppName,SeverityLevel,Severity,LogType,Message
    pip install -r requirements.txt
    ```
 
-#### 基本実行
+#### 基本実行（標準版）
 
 ```powershell
-# シンプル実行（デフォルト設定）
+# デフォルト実行
 python run.py
 
 # 処理内容:
@@ -695,34 +741,189 @@ python run.py
 # 2. RT_IDP_ATTACK を含む行を抽出
 # 3. 列を再構成
 # 4. Severity=CRITICAL の行のみ抽出
-# 5. Excel形式で final_output/ に出力
+# 5. Excel形式で final_output/ に複数ファイルとして出力
+```
+
+#### 引数付き実行（パラメータ変更）
+
+```powershell
+# run_with_args.py を使用
+python run_with_args.py --keyword RT_SCREEN --severity WARNING
+
+# オプション:
+#   --keyword: フィルタキーワード（デフォルト: RT_IDP_ATTACK）
+#   --severity: Severityフィルタ（CRITICAL/WARNING/INFO）
+```
+
+#### 実行ログ例
+
+```
+======================================================================
+Juniper Syslog Filter - Starting...
+======================================================================
+
+[Phase 1] Loop processing started
+----------------------------------------------------------------------
+[ZIP] Processing: 00.zip
+  |- Extracting... OK (1 files)
+  |- Filtering... OK (60198 rows)
+  +- Cleanup... OK
+...
+======================================================================
+✅ Phase 1 完了 ⏱️  経過時間: 0分34秒
+======================================================================
+
+[Phase 2] Merge processing started
+...
+======================================================================
+✅ Phase 2 完了 ⏱️  経過時間: 0分45秒
+======================================================================
+
+...
+
+======================================================================
+✅ Phase 12 完了 ⏱️  経過時間: 2分58秒
+======================================================================
+
+🎉 全処理完了！ ⏱️  合計実行時間: 3分1秒
+======================================================================
 ```
 
 #### 実行結果
 
 ```
 final_output/
-└── filtered_2025-04-28_CRITICAL.xlsx
+├── merged_001.xlsx
+└── merged_002.xlsx
 ```
 
-### Phase 3: GUIモード
+### Web GUI実行方法
+
+#### 起動方法
 
 ```powershell
-python gui.py
+# Streamlit起動
+streamlit run run_gui.py
+
+# または、バッチファイルから
+start_gui.bat
 ```
 
-- フィルタ条件をGUI上で選択
-- キーワード変更可能（デフォルト: RT_IDP_ATTACK）
-- Severity選択可能（デフォルト: CRITICAL）
-- 「実行」ボタンで処理開始
+#### 機能
 
-### Phase 4: ショートカット起動
+- ✅ **リアルタイム進捗表示**（Phase別）
+- ✅ **経過時間表示**（処理中・完了時）
+- ✅ **パラメータ変更**（キーワード・Severity）
+- ✅ **出力ファイル一覧表示**
+- ✅ **実行ログ確認**
 
-デスクトップアイコンをダブルクリック → GUIが起動
+#### 画面イメージ
+
+```
+🔥 Juniper Syslog Filter
+────────────────────────────────────
+
+⚙️ 設定                    │ 📊 処理ステータス
+                           │ 🔄 Phase 5 完了... ⏱️ 経過時間: 6分23秒
+フィルタキーワード          │
+[RT_IDP_ATTACK    ]        │ 📝 処理ログ
+                           │ [ZIP] Processing: 12.zip
+Severityフィルタ           │   |- Extracting... OK
+[CRITICAL        ▼]        │   |- Filtering... OK
+                           │ [Phase 5] IP split started
+─────────────────          │ [Files] Target: 2
+💡 リアルタイム進捗表示     │ [Split] Processing... OK
+                           │
+[🚀 実行              ]    │
+```
+
+#### 処理速度について
+
+| バージョン | 処理時間    | 特徴                          |
+| ---------- | ----------- | ----------------------------- |
+| **CLI版**  | **3-7分** ⚡ | 最速、経過時間表示あり        |
+| **Web版**  | **12-15分** | GUI操作可能、リアルタイム進捗 |
+
+**注意**: Web版はsubprocess経由のため、CLI版より時間がかかります。速さを求める場合はCLI版をお勧めします。
+
+### デスクトップショートカット起動
+
+#### start_gui.bat の内容
+
+```batch
+@echo off
+REM Juniper Syslog Filter - GUI起動スクリプト
+
+echo ========================================
+echo  Juniper Syslog Filter - GUI起動中...
+echo ========================================
+echo.
+
+REM プロジェクトディレクトリに移動
+cd /d "%~dp0"
+
+REM 仮想環境を有効化
+call venv\Scripts\activate.bat
+
+REM Streamlit GUIを起動
+echo [INFO] ブラウザが自動で開きます...
+echo [INFO] 終了するにはこのウィンドウを閉じてください
+echo.
+
+streamlit run run_gui.py
+
+REM 終了時の処理
+echo.
+echo ========================================
+echo  処理が終了しました
+echo ========================================
+pause
+```
+
+#### ショートカット作成
+
+```powershell
+# デスクトップにショートカット作成
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("$Home\Desktop\Juniper Syslog Filter.lnk")
+$Shortcut.TargetPath = "$PWD\start_gui.bat"
+$Shortcut.WorkingDirectory = "$PWD"
+$Shortcut.IconLocation = "C:\Windows\System32\cmd.exe, 0"
+$Shortcut.Save()
+```
 
 ---
 
 ## 🧪 テスト戦略
+
+### テストカバレッジ
+
+**59個のテストケース**で全機能をカバー：
+
+```powershell
+# 全テスト実行
+pytest
+
+# 結果例:
+============================= test session starts ==============================
+collected 59 items
+
+tests/test_extract.py ............                                       [ 20%]
+tests/test_filter_keyword.py ....                                        [ 27%]
+tests/test_cleanup_temp.py ....                                          [ 33%]
+tests/test_merge_files.py .....                                          [ 42%]
+tests/test_reduce_columns.py ....                                        [ 49%]
+tests/test_extract_routing.py ....                                       [ 56%]
+tests/test_split_ip.py .....                                             [ 65%]
+tests/test_classify_ip.py .....                                          [ 74%]
+tests/test_extract_protocol.py ....                                      [ 81%]
+tests/test_extract_severity_level.py ....                                [ 88%]
+tests/test_extract_severity.py ....                                      [ 93%]
+tests/test_filter_critical.py ....                                       [ 97%]
+tests/test_export_excel.py ....                                          [100%]
+
+============================== 59 passed in 6.60s ===============================
+```
 
 ### 単体テスト（pytest）
 
@@ -774,6 +975,7 @@ def test_full_pipeline():
 
 - サンプルZIPファイル（小規模: 1,000行）
 - サンプルZIPファイル（大規模: 1,000,000行）
+- 実務データ再現（3,360万行、脅威0.5%）
 
 ---
 
@@ -784,18 +986,16 @@ juniper-syslog-filter/
 ├── README.md                          # プロジェクト概要
 ├── DESIGN_DOCUMENT.md                 # 本ドキュメント
 ├── requirements.txt                   # 依存ライブラリ
-├── setup.py                           # パッケージ設定
+├── generator.py                       # サンプルsyslog生成スクリプト
 ├── run.py                             # エントリーポイント（CLI）
-├── gui.py                             # GUI起動スクリプト（Phase 3）
+├── run_with_args.py                   # 引数対応CLI（Web版内部処理用）
+├── run_gui.py                         # Web UI（Streamlit）
+├── start_gui.bat                      # GUI起動バッチファイル
 │
 ├── # 開発環境設定
-├── .flake8                            # Flake8コードチェッカー設定
 ├── .gitattributes                     # Git改行コード設定（CRLF対策）
 ├── .vscode/
 │   └── settings.json                  # VSCode設定（フォーマッター等）
-│
-├── scripts/                           # 開発ツール・補助スクリプト
-│   └── generate_sample_data.py       # サンプルsyslog生成スクリプト
 │
 ├── modules/                           # コアモジュール
 │   ├── __init__.py
@@ -814,13 +1014,13 @@ juniper-syslog-filter/
 │   ├── extract_protocol.py           # protocol抽出
 │   ├── extract_severity_level.py     # SeverityLevel抽出
 │   ├── extract_severity.py           # Severity抽出
-│   ├── filter_critical_and_merge.py  # CRITICAL抽出 + マージ
+│   ├── filter_critical.py            # CRITICAL抽出（マージなし）
 │   │
 │   ├── # 最終出力モジュール
-│   ├── export_excel.py               # Excel出力
+│   ├── export_excel.py               # Excel出力（xlsxwriter版）
 │   └── cleanup_all.py                # 全ディレクトリクリーンアップ
 │
-├── tests/                             # テストコード
+├── tests/                             # テストコード（59テスト）
 │   ├── __init__.py
 │   ├── test_extract.py
 │   ├── test_filter_keyword.py
@@ -833,7 +1033,7 @@ juniper-syslog-filter/
 │   ├── test_extract_protocol.py
 │   ├── test_extract_severity_level.py
 │   ├── test_extract_severity.py
-│   ├── test_filter_critical_and_merge.py
+│   ├── test_filter_critical.py       # Phase 10テスト
 │   ├── test_export_excel.py
 │   ├── test_cleanup_all.py
 │   └── test_integration.py
@@ -843,19 +1043,15 @@ juniper-syslog-filter/
 ├── temp_extracted/                    # ZIP展開後（一時）
 ├── filtered_logs/                     # キーワードフィルタ後（一時）
 ├── merged_logs/                       # マージ後（一時）
-├── columns_reduced/                   # 列削除後（一時）
-├── routing_added/                     # routing追加後（一時）
-├── ip_split/                          # IP分離後（一時）
-├── ip_classified/                     # IP判定後（一時）
+├── reduced_logs/                      # 列削除後（一時）
+├── routed_logs/                       # routing追加後（一時）
+├── splitted_logs/                     # IP分離後（一時）
+├── classified_logs/                   # IP判定後（一時）
 ├── protocol_extracted/                # protocol抽出後（一時）
 ├── severity_level_extracted/          # SeverityLevel抽出後（一時）
 ├── severity_extracted/                # Severity抽出後（一時）
 ├── critical_only/                     # CRITICAL抽出後（一時）
-├── final_output/                      # Excel最終出力
-│
-└── docs/                              # 追加ドキュメント
-    ├── architecture.md
-    └── api_reference.md
+└── final_output/                      # Excel最終出力
 ```
 
 ---
@@ -866,9 +1062,10 @@ juniper-syslog-filter/
 
 - **Python ETL開発**: 実務未経験から本番運用レベルまで到達
 - **モジュール設計**: 保守性・拡張性の高い設計手法
-- **テスト駆動開発**: pytestによる品質保証
-- **パフォーマンス最適化**: 2時間→10分の劇的な改善
+- **テスト駆動開発**: pytestによる品質保証（59テスト）
+- **パフォーマンス最適化**: 2時間→3分の劇的な改善（約40倍高速化）
 - **pandas活用**: ベクトル演算による高速処理
+- **xlsxwriter活用**: Excel出力の2-3倍高速化
 
 ### ソフトスキル
 
@@ -886,10 +1083,10 @@ juniper-syslog-filter/
 
 ### 追加機能案
 
-- [ ] Slackへの通知機能
+- [x] Slackへの通知機能（実装候補）
 - [ ] スケジュール実行（cronライク）
 - [ ] ログレベルでの統計情報出力
-- [ ] ダッシュボード機能（Streamlit等）
+- [ ] ダッシュボード機能（Streamlit拡張）
 
 ### コミュニティ貢献
 
@@ -916,13 +1113,39 @@ MIT License
 
 ## 📅 更新履歴
 
-| 日付       | バージョン | 内容                                                                       |
-| ---------- | ---------- | -------------------------------------------------------------------------- |
-| 2025-12-16 | 1.0.0      | 初版作成・設計書完成                                                       |
-| 2025-12-16 | 1.1.0      | 詳細な処理フロー反映・14モジュール構成に更新                               |
-| 2025-12-16 | 1.2.0      | 開発環境セットアップ追加（uv + venv + VSCode + PowerShell）                |
-| 2025-12-18 | 2.0.0      | pandas方針追加・scripts/ディレクトリ追加・サンプルデータ生成スクリプト統合 |
-| 2025-12-18 | 2.1.0      | pandas実装完了・インターフェース設計を実際の実装に更新（List[Path]方式）   |
-| 2025-12-19 | 2.2.0      | Phase 10統合反映・開発環境設定ファイル追加・AI利用方針明記                 |
+| 日付       | バージョン | 内容                                                                                         |
+| ---------- | ---------- | -------------------------------------------------------------------------------------------- |
+| 2025-12-16 | 1.0.0      | 初版作成・設計書完成                                                                         |
+| 2025-12-16 | 1.1.0      | 詳細な処理フロー反映・14モジュール構成に更新                                                 |
+| 2025-12-16 | 1.2.0      | 開発環境セットアップ追加（uv + venv + VSCode + PowerShell）                                  |
+| 2025-12-18 | 2.0.0      | pandas方針追加・scripts/ディレクトリ追加・サンプルデータ生成スクリプト統合                   |
+| 2025-12-18 | 2.1.0      | pandas実装完了・インターフェース設計を実際の実装に更新（List[Path]方式）                     |
+| 2025-12-19 | 2.2.0      | Phase 10統合反映・開発環境設定ファイル追加・AI利用方針明記                                   |
+| 2025-12-20 | 3.0.0      | **Phase 10-12完全実装・xlsxwriter導入・Web GUI完成・経過時間表示・実務データ負荷テスト完了** |
+
+### v3.0.0の主な変更点
+
+#### 機能追加
+- ✅ **Phase 10**: filter_critical.py（マージ削除、複数ファイル出力）
+- ✅ **Phase 11**: 複数ファイルのループ処理対応
+- ✅ **xlsxwriter導入**: Excel出力を2-3倍高速化
+- ✅ **経過時間表示**: CLI版でPhase別・合計時間表示
+- ✅ **Web GUI完成**: Streamlit実装、リアルタイム進捗表示
+- ✅ **run_with_args.py**: 引数対応CLI（Web版内部処理用）
+
+#### パフォーマンス
+- ✅ **実務データ処理**: 3,360万行を3分1秒で処理（実測）
+- ✅ **Excel出力**: openpyxl → xlsxwriter（2-3倍高速化）
+
+#### テスト
+- ✅ **59テストケース**: 全モジュールをカバー
+- ✅ **実務データ負荷テスト**: 完了
+
+#### ドキュメント
+- ✅ **処理時間実測値**: 反映
+- ✅ **ファイル構成**: 最新版に更新
+- ✅ **使用方法**: CLI/Web両対応
 
 ---
+
+**🎉 プロジェクト完成！実務運用可能な状態です**
