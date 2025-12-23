@@ -7,7 +7,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 # デフォルト設定
-DEFAULT_OUTPUT_DIR = "output_logs"
+# プロジェクトルート（このファイルの1つ上）にsource_logsを作成
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_OUTPUT_DIR = str(BASE_DIR / "source_logs")
+
 DEFAULT_DATE = datetime(2025, 4, 28)
 DEFAULT_HOSTNAME = "srx-fw01"
 DEFAULT_ROWS_PER_HOUR = 5000
@@ -15,12 +18,12 @@ DEFAULT_THREAT_RATIO = 0.1
 
 # Juniper SRX風のアプリケーション名とメッセージ
 JUNOS_APPS = [
-    "RT_FLOW",      # セッションログ
-    "RT_SCREEN",    # 脅威検知
-    "RT_IDP",       # IDP/IPS
-    "UI_AUTH",      # 認証
-    "SSHD",         # SSH
-    "RT_UTM"        # UTM関連
+    "RT_FLOW",  # セッションログ
+    "RT_SCREEN",  # 脅威検知
+    "RT_IDP",  # IDP/IPS
+    "UI_AUTH",  # 認証
+    "SSHD",  # SSH
+    "RT_UTM",  # UTM関連
 ]
 
 # Juniper風の通常ログメッセージ
@@ -28,21 +31,21 @@ NORMAL_MESSAGES = {
     "RT_FLOW": [
         "RT_FLOW_SESSION_CREATE: session created",
         "RT_FLOW_SESSION_CLOSE: session closed",
-        "RT_FLOW_SESSION_DENY: session denied"
+        "RT_FLOW_SESSION_DENY: session denied",
     ],
     "UI_AUTH": [
         "UI_LOGIN_EVENT: User logged in via ssh",
         "UI_LOGOUT_EVENT: User logged out",
-        "UI_COMMIT: Commit complete"
+        "UI_COMMIT: Commit complete",
     ],
     "SSHD": [
         "SSHD_LOGIN_SUCCESS: Password authentication succeeded",
-        "SSHD_LOGOUT_INFO: Closed connection"
+        "SSHD_LOGOUT_INFO: Closed connection",
     ],
     "RT_UTM": [
         "RT_UTM_WEBFILTER_BLOCKED: URL blocked by policy",
-        "RT_UTM_AV_SCAN_OK: No virus detected"
-    ]
+        "RT_UTM_AV_SCAN_OK: No virus detected",
+    ],
 }
 
 # Juniper風の脅威ログメッセージ
@@ -51,17 +54,15 @@ THREAT_MESSAGES = {
         "RT_SCREEN_TCP: SYN flood attack detected",
         "RT_SCREEN_IP: IP spoofing detected",
         "RT_SCREEN_ICMP: ICMP flood detected",
-        "RT_SCREEN_UDP: UDP flood detected"
+        "RT_SCREEN_UDP: UDP flood detected",
     ],
     "RT_IDP": [
         "RT_IDP_ATTACK_LOG: SQL injection attack detected",
         "RT_IDP_ATTACK_LOG: SSH brute force attack detected",
         "RT_IDP_ATTACK_LOG: Port scan detected",
-        "RT_IDP_ATTACK_LOG: Malware signature match"
+        "RT_IDP_ATTACK_LOG: Malware signature match",
     ],
-    "RT_FLOW": [
-        "RT_FLOW_SESSION_DENY: Policy deny"
-    ]
+    "RT_FLOW": ["RT_FLOW_SESSION_DENY: Policy deny"],
 }
 
 # RFC5424準拠のSeverityレベル
@@ -73,7 +74,7 @@ SEVERITIES = {
     "WARNING": 4,
     "NOTICE": 5,
     "INFO": 6,
-    "DEBUG": 7
+    "DEBUG": 7,
 }
 
 
@@ -84,12 +85,22 @@ class JuniperSyslogGenerator:
         self.hostname = hostname
         self.rows_per_hour = rows_per_hour
         self.threat_ratio = threat_ratio
-        self.output_dir.mkdir(exist_ok=True)
+
+        # --- ディレクトリの条件分岐処理 ---
+        if self.output_dir.exists():
+            print(
+                f"INFO: Output directory '{self.output_dir}' already exists. Using it."
+            )
+        else:
+            print(f"INFO: Creating new directory '{self.output_dir}'...")
+            # parents=True: 親ディレクトリも必要なら作る, exist_ok=True: 作成直前に他で作られてもエラーにしない
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        # --------------------------------
 
     def random_timestamp(self, base_time):
         """ランダムなタイムスタンプ生成（秒単位でランダム）"""
         offset = random.randint(0, 3599)
-        return (base_time + timedelta(seconds=offset)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return (base_time + timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def random_private_ip(self):
         """プライベートIPアドレスをランダム生成"""
@@ -161,7 +172,7 @@ class JuniperSyslogGenerator:
             severity_level,
             severity,
             log_type,
-            full_message
+            full_message,
         ]
 
     def create_hourly_log(self, hour):
@@ -171,20 +182,33 @@ class JuniperSyslogGenerator:
             hour_str = f"{hour:02d}"
             csv_path = self.output_dir / f"{hour_str}.csv"
 
-            with open(csv_path, "w", newline="", encoding="utf-8", buffering=1024*1024) as csvfile:
+            with open(
+                csv_path, "w", newline="", encoding="utf-8", buffering=1024 * 1024
+            ) as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow([
-                    "Timestamp", "Hostname", "AppName", "SeverityLevel",
-                    "Severity", "LogType", "Message"
-                ])
-                
+                writer.writerow(
+                    [
+                        "Timestamp",
+                        "Hostname",
+                        "AppName",
+                        "SeverityLevel",
+                        "Severity",
+                        "LogType",
+                        "Message",
+                    ]
+                )
+
                 # バッチ処理で効率化
-                rows = [self.generate_log_row(base_time) for _ in range(self.rows_per_hour)]
+                rows = [
+                    self.generate_log_row(base_time) for _ in range(self.rows_per_hour)
+                ]
                 writer.writerows(rows)
 
             # ZIP圧縮
             zip_path = self.output_dir / f"{hour_str}.zip"
-            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
+            with zipfile.ZipFile(
+                zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+            ) as zipf:
                 zipf.write(csv_path, arcname=f"{hour_str}.csv")
 
             os.remove(csv_path)
@@ -194,27 +218,12 @@ class JuniperSyslogGenerator:
             print(f"Error creating hourly log for hour {hour}: {e}")
             return False
 
-    def create_daily_zip(self):
-        """24時間分のZIPファイルを1つの日次ZIPにまとめる"""
-        try:
-            day_zip = self.output_dir / f"{self.date.strftime('%Y-%m-%d')}.zip"
-            with zipfile.ZipFile(day_zip, 'w', compression=zipfile.ZIP_DEFLATED) as dayzip:
-                for hour in range(24):
-                    hour_zip_path = self.output_dir / f"{hour:02d}.zip"
-                    if hour_zip_path.exists():
-                        dayzip.write(hour_zip_path, arcname=f"{hour:02d}.zip")
-                        os.remove(hour_zip_path)
-
-            print(f"Daily ZIP created: {day_zip}")
-            return True
-
-        except IOError as e:
-            print(f"Error creating daily zip: {e}")
-            return False
-
     def generate(self):
         """メイン処理：24時間分のログを生成"""
-        print(f"Generating Juniper-style syslog for {self.date.strftime('%Y-%m-%d')}...")
+        print(
+            f"Generating Juniper-style syslog for {self.date.strftime('%Y-%m-%d')}..."
+        )
+        print(f"Target Path: {self.output_dir}")
         print(f"Hostname: {self.hostname}")
         print(f"Rows per hour: {self.rows_per_hour:,}")
         print(f"Threat ratio: {self.threat_ratio*100:.1f}%")
@@ -227,9 +236,8 @@ class JuniperSyslogGenerator:
                 print(f"✗ Hour {hour:02d}:00 failed")
 
         print("-" * 60)
-        print("Creating daily archive...")
-        self.create_daily_zip()
-        print(f"\nDone! Files are in: {self.output_dir}")
+        print(f"Done! 24 ZIP files are ready in: {self.output_dir}")
+        print("You can now run run.py immediately.")
 
 
 def main():
@@ -237,37 +245,42 @@ def main():
         description="Generate Juniper-style syslog test data (v2)"
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})"
+        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
-        "-d", "--date",
-        default=DEFAULT_DATE.strftime('%Y-%m-%d'),
-        help=f"Log date in YYYY-MM-DD format (default: {DEFAULT_DATE.strftime('%Y-%m-%d')})"
+        "-d",
+        "--date",
+        default=DEFAULT_DATE.strftime("%Y-%m-%d"),
+        help=f"Log date in YYYY-MM-DD format (default: {DEFAULT_DATE.strftime('%Y-%m-%d')})",
     )
     parser.add_argument(
-        "-H", "--hostname",
+        "-H",
+        "--hostname",
         default=DEFAULT_HOSTNAME,
-        help=f"Hostname for logs (default: {DEFAULT_HOSTNAME})"
+        help=f"Hostname for logs (default: {DEFAULT_HOSTNAME})",
     )
     parser.add_argument(
-        "-r", "--rows",
+        "-r",
+        "--rows",
         type=int,
         default=DEFAULT_ROWS_PER_HOUR,
-        help=f"Rows per hour (default: {DEFAULT_ROWS_PER_HOUR})"
+        help=f"Rows per hour (default: {DEFAULT_ROWS_PER_HOUR})",
     )
     parser.add_argument(
-        "-t", "--threat-ratio",
+        "-t",
+        "--threat-ratio",
         type=float,
         default=DEFAULT_THREAT_RATIO,
-        help=f"Threat log ratio 0.0-1.0 (default: {DEFAULT_THREAT_RATIO})"
+        help=f"Threat log ratio 0.0-1.0 (default: {DEFAULT_THREAT_RATIO})",
     )
 
     args = parser.parse_args()
 
     try:
-        log_date = datetime.strptime(args.date, '%Y-%m-%d')
+        log_date = datetime.strptime(args.date, "%Y-%m-%d")
     except ValueError:
         print("Error: Invalid date format. Use YYYY-MM-DD")
         return
@@ -281,7 +294,7 @@ def main():
         date=log_date,
         hostname=args.hostname,
         rows_per_hour=args.rows,
-        threat_ratio=args.threat_ratio
+        threat_ratio=args.threat_ratio,
     )
 
     generator.generate()
