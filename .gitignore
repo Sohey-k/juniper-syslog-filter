@@ -16,7 +16,6 @@ env/
 .idea/
 
 # データディレクトリ
-source_logs/
 temp_extracted/
 filtered_logs/
 merged_logs/
