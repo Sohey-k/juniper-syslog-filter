@@ -23,30 +23,46 @@ Juniper SRX syslogから脅威データを高速抽出・Excel出力するETLツ
 | 操作性   | マウス操作不可   | **バックグラウンド実行**   |
 
 ## 🚀 クイックスタート
+git clone してから解析完了まで、わずか数分で体験できます。
 
 ### インストール
 
+### A. 標準の Python コマンドを使用する場合
 ```powershell
 # リポジトリのクローン
-git clone https://github.com/Sohey-k/juniper-syslog-generator.git
-cd juniper-syslog-generator
+git clone https://github.com/Sohey-k/juniper-syslog-filter.git
+cd juniper-syslog-filter
 
-# 仮想環境の作成
-uv venv
-venv\Scripts\activate
+# 仮想環境の作成と有効化
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 
 # 依存パッケージのインストール
+pip install -r requirements.txt
+```
+
+### B. uv を使用する場合（高速・推奨）
+```powershell
+# uv のインストール（未導入の場合）
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 環境構築
+uv venv
+.\.venv\Scripts\Activate.ps1
 uv pip install -r requirements.txt
 ```
 
-### テストデータの生成
+
+### テストデータの自動生成
+
+手動でログを配置する必要はありません。スクリプトがプロジェクトルートに source_logs/ を自動作成し、24時間分のZIPデータを生成します。
 
 ```powershell
 # 実務データ再現（3,360万行、脅威出現率0.5%）
-python generator.py -o source_logs -r 1400000 -t 0.005
+python scripts/generate_logs.py -r 1400000 -t 0.005
 
 # 軽量テストデータ（480万行、脅威出現率50%）
-python generator.py -o source_logs -r 200000 -t 0.5
+python scripts/generate_logs.py -r 200000 -t 0.5
 ```
 
 ## 📖 使い方
@@ -105,7 +121,7 @@ ZIP展開 → キーワードフィルタ → マージ → 列削除 → routin
 
 ### 技術スタック
 
-- **Python 3.8+**
+- **Python 3.10+**
 - **pandas**: 高速データ処理（ベクトル演算）
 - **xlsxwriter**: Excel出力（openpyxlの2-3倍高速）
 - **Streamlit**: Web UI
@@ -156,13 +172,22 @@ pytest --cov=modules --cov-report=html
 
 MIT License
 
+## 🙏 謝辞
+
+本プロジェクトの開発において、生成AI（ChatGPT/Claude）を設計整理・コード品質向上のサポートツールとして活用しました。
+
+## 🔒 セキュリティ・機密保持について
+
+本プロジェクトの公開にあたり、以下の事項を遵守しています。
+
+- **機密情報の完全排除**: 本リポジトリに含まれるソースコード、設定ファイル、およびテストデータには、実務で知り得た機密情報（IPアドレス、ホスト名、顧客情報、社内ログ等）は一切含まれていません。
+- **合成データの使用**: 検証に使用しているログデータは、付属の `scripts/generate_logs.py` によって機械的に生成された「統計的に実務データに近似させた合成データ」であり、実在のインフラ環境を写したものではありません。
+- **クリーンな開発環境**: 開発および検証は完全に個人の独立した環境で行われており、機密ネットワークへの接続やデータの持ち出しは発生していません。
+
+
 ## 👤 作者
 
 **Sohey-k**
 
 - GitHub: [@Sohey-k](https://github.com/Sohey-k)
 - 実務経験を基にした、実践的なETLツール開発
-
-## 🙏 謝辞
-
-本プロジェクトの開発において、生成AI（ChatGPT/Claude）を設計整理・コード品質向上のサポートツールとして活用しました。
